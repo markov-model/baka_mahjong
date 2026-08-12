@@ -744,12 +744,57 @@ socket.on('update_room', (data) => {
 socket.on('error_msg', (data) => showError(data.message));
 socket.on('system_msg', (data) => {
     console.log("💬 [system_msg]:", data.message);
-    // チョンボは action_chombo 送信時にも鳴らすが、自分が送り主でない場合はこの通知でしか気付けないため、
-    // ここでもメッセージ本文から検知して鳴らす（自分が送信者の場合は二重に鳴ることがあるが許容する）
-    if (typeof data.message === 'string' && data.message.includes('チョンボ')) {
-        playSe('chombo');
+    // ポン・ロン・チョンボは、行動した本人だけでなく他のプレイヤーにも音で気付けるようにする。
+    // サーバーからは「何が起きたか」を表す専用イベントが個別に飛んでこないため、
+    // メッセージ本文から検知して鳴らす（自分が行動者の場合はボタンのonclickと二重に鳴ることがあるが許容する）
+    if (typeof data.message === 'string') {
+        if (data.message.includes('チョンボ')) {
+            playSe('chombo');
+        } else if (data.message.includes('📣 ポン')) {
+            playSe('pon');
+        } else if (data.message.includes('ロンを宣言')) {
+            playSe('ron');
+        }
     }
     showToast(data.message);
+});
+
+// ==================================================
+// チョンボ発生ポップアップ（理由・手牌つき。トーストだと見落としやすいため専用モーダルで表示）
+// ==================================================
+function closeChomboModal() {
+    const modal = document.getElementById('chombo-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+socket.on('chombo_result', (data) => {
+    let modal = document.getElementById('chombo-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'chombo-modal';
+        modal.className = 'win-modal-overlay';
+        document.body.appendChild(modal);
+    }
+
+    const handHtml = (data.hand || []).map(t => `<div class="tile-card tile-kawa" style="color:${getTileColor(t)};">${formatTile(t)}</div>`).join('');
+    const meldsHtml = (data.melds || []).map(m => `<div class="tile-card tile-kawa" style="color:${getTileColor(m.tile)}; border-color:#00b894;">${formatTile(m.tile)}</div>`).join('');
+
+    modal.innerHTML = `
+        <div class="win-modal-content">
+            <h2 style="color:#ff4757; margin-top:0;">🚨 チョンボ発生！</h2>
+            <div style="text-align:left; background:rgba(0,0,0,0.3); padding:12px; border-radius:8px; margin:15px 0; line-height:1.7;">
+                <div><strong>対象:</strong> ${escapeHtml(data.offender)} さん</div>
+                <div style="margin-top:6px;"><strong>理由:</strong> <span style="color:#ffd700;">${escapeHtml(data.reason)}</span></div>
+                <div style="margin-top:10px; color:#ff4757; font-weight:bold;">罰符 -${escapeHtml(data.penalty)}点</div>
+                ${(handHtml || meldsHtml) ? `
+                    <div style="margin-top:10px;"><strong>その時の手牌:</strong></div>
+                    <div style="display:flex; flex-wrap:wrap; gap:2px; margin-top:4px;">${handHtml}${meldsHtml}</div>
+                ` : ''}
+            </div>
+            <button onclick="closeChomboModal()" class="btn-primary" style="padding:10px 24px; font-size:16px;">確認して閉じる</button>
+        </div>
+    `;
+    modal.style.display = 'flex';
 });
 
 // state_update の差分から、鳴らすべきSEを判定して再生する
