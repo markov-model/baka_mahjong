@@ -1,0 +1,237 @@
+:root {
+    --bg-color: #0b1d13;
+    --card-bg: rgba(10, 25, 18, 0.75);
+    --tile-bg: #fffdf0;
+    --tile-text: #1a1a1a;
+    --accent-green: #00ffcc;
+    --accent-yellow: #ffd700;
+    --accent-red: #ff3366;
+    --neon-glow: 0 0 10px rgba(0, 255, 204, 0.5);
+}
+
+body { 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    text-align: center; 
+    background: var(--bg-color); 
+    color: white; 
+    padding: 15px; 
+    margin: 0; 
+    user-select: none; 
+}
+
+h1 {
+    text-shadow: 0 0 8px var(--accent-yellow);
+    margin-bottom: 20px;
+}
+
+.card { 
+    background: var(--card-bg); 
+    border-radius: 12px; 
+    padding: 24px; 
+    max-width: 500px; 
+    margin: 20px auto; 
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6); 
+    border: 1px solid rgba(0, 255, 204, 0.2);
+    backdrop-filter: blur(8px);
+}
+
+input[type="text"] { 
+    font-size: 18px; 
+    padding: 12px; 
+    border-radius: 6px; 
+    border: 1px solid #335544; 
+    background: rgba(0,0,0,0.5);
+    color: white;
+    text-align: center; 
+    margin: 10px 0; 
+    width: 80%; 
+    outline: none;
+}
+input[type="text"]:focus {
+    border-color: var(--accent-green);
+    box-shadow: var(--neon-glow);
+}
+
+button { 
+    font-size: 16px; 
+    padding: 10px 20px; 
+    margin: 6px; 
+    cursor: pointer; 
+    border-radius: 6px; 
+    border: none; 
+    font-weight: bold; 
+    transition: all 0.2s ease; 
+}
+button:hover { opacity: 0.9; transform: translateY(-2px); }
+button:active { transform: translateY(0); }
+
+.btn-primary { background: #00b894; color: white; }
+.btn-secondary { background: #0984e3; color: white; }
+.btn-start { background: #d63031; color: white; font-size: 20px; width: 90%; }
+
+.btn-action { background: #6c5ce7; color: white; }
+.btn-agari { 
+    background: #e17055; 
+    color: white; 
+    font-size: 18px; 
+    box-shadow: 0 0 15px #e17055; 
+    animation: pulse 1s infinite alternate; 
+}
+.btn-chombo { background: #d63031; color: white; }
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    100% { transform: scale(1.05); }
+}
+
+.room-code { 
+    font-size: 36px; 
+    letter-spacing: 6px; 
+    color: var(--accent-yellow); 
+    font-weight: bold; 
+    background: rgba(0,0,0,0.4); 
+    padding: 10px; 
+    border-radius: 8px; 
+    margin: 12px 0; 
+    border: 1px dashed var(--accent-yellow);
+}
+
+.player-list { 
+    text-align: left; 
+    background: rgba(0,0,0,0.3); 
+    border-radius: 8px; 
+    padding: 12px; 
+    margin: 15px 0; 
+}
+
+.player-item { 
+    font-size: 16px; 
+    padding: 8px 0; 
+    border-bottom: 1px solid rgba(255,255,255,0.1); 
+    display: flex; 
+    justify-content: space-between; 
+}
+
+.badge-host { background: var(--accent-yellow); color: #111; font-size: 12px; padding: 2px 8px; border-radius: 12px; font-weight: bold; }
+.badge-wind { background: #0984e3; color: white; font-size: 13px; padding: 2px 8px; border-radius: 4px; margin-right: 8px; font-weight: bold; }
+
+.game-container { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 15px; }
+
+.info-bar { 
+    display: flex; 
+    justify-content: space-around; 
+    align-items: center;
+    background: rgba(0,0,0,0.6); 
+    padding: 12px; 
+    border-radius: 8px; 
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    font-size: 16px; 
+    font-weight: bold; 
+}
+
+.timer-box { font-size: 20px; color: var(--accent-yellow); font-weight: bold; margin: 5px 0; }
+
+.opponents-area { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.opponent-card { 
+    background: rgba(0,0,0,0.4); 
+    border-radius: 8px; 
+    padding: 12px; 
+    border: 1px solid #2d5540; 
+    text-align: left; 
+}
+.opponent-card.active-turn { 
+    border-color: var(--accent-green); 
+    background: rgba(0, 255, 204, 0.1); 
+    box-shadow: var(--neon-glow);
+}
+
+.kawa-area { 
+    background: rgba(0, 0, 0, 0.3); 
+    border-radius: 6px; 
+    padding: 6px; 
+    margin-top: 6px; 
+    min-height: 50px; 
+    display: flex; 
+    flex-wrap: wrap; 
+    gap: 4px; 
+}
+
+.tile { 
+    display: inline-flex; 
+    align-items: center; 
+    justify-content: center; 
+    width: 42px; 
+    height: 58px; 
+    background: var(--tile-bg); 
+    color: var(--tile-text); 
+    font-weight: bold; 
+    font-size: 17px; 
+    border-radius: 6px; 
+    box-shadow: 0 4px 0 #b3a98b, 0 5px 8px rgba(0,0,0,0.5); 
+    cursor: pointer; 
+    transition: transform 0.15s ease; 
+    border: 1px solid #dcdde1; 
+}
+.tile:hover { transform: translateY(-6px); background: #ffffff; }
+
+.tile-small { 
+    width: 30px; 
+    height: 40px; 
+    font-size: 12px; 
+    border-radius: 4px;
+    box-shadow: 0 2px 0 #888; 
+    cursor: default; 
+}
+.tile-small:hover { transform: none; }
+
+.hand-area { 
+    background: rgba(0,0,0,0.5); 
+    padding: 18px; 
+    border-radius: 12px; 
+    border: 2px solid var(--accent-yellow); 
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.hand-tiles { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+
+.agari-controls { margin-top: 15px; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.error-msg { color: var(--accent-red); background: rgba(255,51,102,0.15); padding: 8px; border-radius: 6px; margin-bottom: 10px; display: none; }
+
+.modal-overlay {
+    position: fixed; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 1000;
+}
+.modal-content {
+    background: #1a1a1a; padding: 40px; border: 2px solid var(--accent-yellow);
+    border-radius: 16px; text-align: center; box-shadow: 0 0 30px var(--accent-yellow);
+}
+/* アガリ演出モーダル用スタイル */
+.win-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(5px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.win-modal-content {
+    background: #112a1d;
+    border: 2px solid var(--accent-yellow);
+    border-radius: 12px;
+    padding: 30px;
+    width: 90%;
+    max-width: 450px;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(255, 215, 0, 0.5);
+    animation: modalPop 0.3s ease-out;
+}
+
+@keyframes modalPop {
+    0% { transform: scale(0.8); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}

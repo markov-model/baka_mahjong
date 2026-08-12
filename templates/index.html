@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>208枚超インフレ麻雀</title>
+    <!-- Socket.IO CDN -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <!-- CSS読み込み -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <h1>🀄 208枚 超インフレ麻雀 🀄</h1>
+
+    <!-- ==================================================== -->
+    <!-- 1. エントリー画面（部屋作成・コード入力・参加） -->
+    <!-- ==================================================== -->
+    <div id="screen-entry" class="card">
+        <h2>対局ロビー</h2>
+
+        <!-- エラー表示エリア -->
+        <div id="entry-error" class="error-msg" style="display:none; color:#ff3366; background:rgba(255,51,102,0.15); padding:8px; border-radius:6px; margin-bottom:12px; font-weight:bold;"></div>
+
+        <div style="margin-bottom: 20px;">
+            <label for="username" style="display:block; margin-bottom:6px; font-weight:bold;">プレイヤー名</label>
+            <input type="text" id="username" placeholder="名前を入力（例: 雀神）" value="プレイヤー1">
+        </div>
+
+        <hr style="border: 0.5px solid rgba(255,255,255,0.1); margin: 20px 0;">
+
+        <!-- 部屋作成ボタン -->
+        <div style="margin-bottom: 25px;">
+            <p style="font-size: 14px; color: #aaa; margin-bottom: 8px;">あなたが親となって新しい卓を立てる場合</p>
+            <button class="btn-primary" onclick="createRoom()" style="width: 80%; padding: 12px; font-size: 18px;">✨ 新しい部屋を作る</button>
+        </div>
+
+        <!-- 部屋参加（コード入力） -->
+        <div>
+            <p style="font-size: 14px; color: #aaa; margin-bottom: 8px;">友達の部屋に参加する場合</p>
+            <input type="text" id="join-code" placeholder="4桁の部屋コード" maxlength="4" style="letter-spacing: 4px; font-weight: bold; text-transform: uppercase;"><br>
+            <button class="btn-secondary" onclick="joinRoom()" style="width: 80%; padding: 12px; font-size: 18px; margin-top: 8px;">⚔️ 部屋に参加する</button>
+        </div>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- 2. 待機画面（プレイヤー集まり待ち） -->
+    <!-- ==================================================== -->
+    <div id="screen-waiting" class="card" style="display: none;">
+        <h2>対局準備中</h2>
+        <p style="margin-bottom: 4px;">部屋コード（友達に共有してください）</p>
+        <div id="display-room-code" class="room-code">----</div>
+
+        <div style="margin: 20px 0;">
+            <h3>参加プレイヤー (<span id="player-count">1</span>/4)</h3>
+            <div id="players-container" class="player-list">
+                <!-- JavaScriptで参加者が動的に追加されます -->
+            </div>
+        </div>
+
+        <!-- ホストのみに表示される開始ボタン -->
+        <div id="host-controls" style="display: none; margin-top: 20px;">
+            <button class="btn-start" onclick="startGame()">🀄 対局を開始する</button>
+        </div>
+        <p id="waiting-msg" style="font-size: 13px; color: #aaa; margin-top: 10px;">※ 2名以上揃うとホストが対局を開始できます</p>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- 3. ゲーム対局画面 -->
+    <!-- ==================================================== -->
+    <div id="screen-game" class="game-container" style="display: none;">
+        <!-- ヘッダー情報バー -->
+        <div class="info-bar">
+            <div>部屋: <span id="game-room-code" style="color:var(--accent-yellow);">----</span></div>
+            <div>山札残り: <span id="deck-count" style="color:var(--accent-green);">208</span> 枚</div>
+            <div>ドラ表示牌: <span id="dora-tile" style="color:#ff7675;">--</span></div>
+        </div>
+
+        <!-- 手番ステータス表示 -->
+        <div class="timer-box">
+            <div id="turn-status-text">対局中...</div>
+            <div id="timer-display" style="font-size: 14px; font-weight: normal; margin-top: 4px;"></div>
+        </div>
+
+        <!-- 対戦相手エリア -->
+        <div id="opponents-container" class="opponents-area">
+            <!-- JavaScriptで他プレイヤーの河や手牌枚数が描画されます -->
+        </div>
+
+        <!-- 自分の河（捨て牌） -->
+        <div style="background: rgba(0,0,0,0.4); padding: 10px; border-radius: 8px; text-align: left;">
+            <div style="font-size: 12px; color: #aaa; margin-bottom: 4px;">自分の河 (捨て牌):</div>
+            <div id="my-kawa" class="kawa-area"></div>
+        </div>
+
+        <!-- 自分の手牌エリア -->
+        <div class="hand-area">
+            <div style="font-size: 14px; color: #ffd700; font-weight: bold;">あなたの手牌</div>
+            <div id="my-hand" class="hand-tiles">
+                <!-- JavaScriptで牌が並びます -->
+            </div>
+        </div>
+
+        <!-- アクションボタンエリア（ポン、カン、ツモ、ロン、チョンボ） -->
+        <div id="agari-controls" class="agari-controls">
+            <!-- JavaScriptで動的に生成されます -->
+        </div>
+    </div>
+
+<!-- ==================================================== -->
+    <!-- 🀄 アガリ結果ポップアップ演出モーダル -->
+    <!-- ==================================================== -->
+    <div id="win-modal" class="win-modal-overlay" style="display: none;">
+        <div class="win-modal-content">
+            <h2 id="win-modal-title" style="color: var(--accent-yellow); margin-top: 0;">🀄 アガリ達成！</h2>
+            <div id="win-modal-details" style="font-size: 16px; margin: 15px 0; line-height: 1.6; text-align: left; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px;">
+                <!-- 動的に詳細が挿入されます -->
+            </div>
+            <div id="win-modal-score" style="font-size: 26px; color: var(--accent-red); font-weight: bold; margin: 15px 0;">
+                <!-- スコア変動 -->
+            </div>
+            <button onclick="closeWinModal()" class="btn-primary" style="padding: 10px 24px; font-size: 16px;">確認して閉じる</button>
+        </div>
+    </div>
+
+    <!-- JavaScript読み込み（※ここを1つだけに修正） -->
+    <script src="/static/script.js"></script>
+</body>
+</html>
