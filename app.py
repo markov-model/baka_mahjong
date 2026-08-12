@@ -74,12 +74,17 @@ def _deal_new_hand(room):
         p['melds'] = []
         p['discards_called'] = False  # 流しマンガン判定用：この局で自分の捨て牌が鳴かれたか
         p['riichi'] = False
+        p['drawn_tile'] = None          # 直近でツモった牌（河・手牌表示のツモ切り判定用）
+        p['pending_riichi_discard'] = False  # リーチ宣言直後の次の打牌かどうか
+        p['riichi_tile_index'] = None   # 河の中でリーチ宣言牌にあたるインデックス（横向き表示用）
 
     room['current_turn'] = room['dealer_idx']
     active_player = room['players'][room['current_turn']]
     if room['deck']:
-        active_player['hand'].append(room['deck'].pop())
+        drawn = room['deck'].pop()
+        active_player['hand'].append(drawn)
         active_player['hand'].sort()
+        active_player['drawn_tile'] = drawn
 
 def _advance_to_next_hand(room, room_id):
     """現在の局を終える。東風戦（参加人数分の局）を全て消化していれば対局終了、
@@ -254,6 +259,11 @@ def _perform_discard(room, room_id, player, tile_to_remove):
     """打牌を確定し、ロン/鳴き待ちタイマーを開始する（人間の打牌・切断者の自動打牌の共通処理）"""
     player['hand'].remove(tile_to_remove)
     player['kawa'].append(tile_to_remove)
+    player['drawn_tile'] = None
+    if player.get('pending_riichi_discard'):
+        # リーチ宣言後、最初の打牌＝リーチ宣言牌として河の中の位置を記録する（横向き表示用）
+        player['riichi_tile_index'] = len(player['kawa']) - 1
+        player['pending_riichi_discard'] = False
     room['last_discard'] = tile_to_remove
     room['last_discard_player'] = player['id']
     room['ron_claims'] = []
@@ -293,8 +303,10 @@ def wait_and_advance(target_room_id, expected_seq):
 
         target_room['current_turn'] = (target_room['current_turn'] + 1) % len(target_room['players'])
         next_player = target_room['players'][target_room['current_turn']]
-        next_player['hand'].append(target_room['deck'].pop())
+        drawn = target_room['deck'].pop()
+        next_player['hand'].append(drawn)
         next_player['hand'].sort()
+        next_player['drawn_tile'] = drawn
 
         broadcast_state(target_room_id)
         _auto_discard_if_disconnected(target_room, target_room_id)
@@ -309,7 +321,10 @@ def _auto_discard_if_disconnected(room, room_id):
     current_player = room['players'][room['current_turn']]
     if not current_player.get('disconnected') or not current_player['hand']:
         return
-    _perform_discard(room, room_id, current_player, current_player['hand'][0])
+    # ツモ切り（直近でツモった牌をそのまま切る）を優先する。手牌に無ければ先頭の牌を切る
+    drawn = current_player.get('drawn_tile')
+    tile_to_discard = drawn if drawn in current_player['hand'] else current_player['hand'][0]
+    _perform_discard(room, room_id, current_player, tile_to_discard)
 
 def check_agari(hand):
     if len(hand) != 14:
@@ -345,12 +360,19 @@ def _relative_direction(room, caller, discarder):
         return '対面'
 
 def _remove_last_kawa_tile(player, tile):
-    """河（捨て牌）の中から鳴かれた牌を1枚（末尾優先）取り除く"""
+    """河（捨て牌）の中から鳴かれた牌を1枚（末尾優先）取り除く。
+    リーチ宣言牌の位置を記録している場合は、取り除いた位置に応じて追従・無効化する。"""
     if not player:
         return
     for i in range(len(player['kawa']) - 1, -1, -1):
         if player['kawa'][i] == tile:
             player['kawa'].pop(i)
+            riichi_idx = player.get('riichi_tile_index')
+            if riichi_idx is not None:
+                if i == riichi_idx:
+                    player['riichi_tile_index'] = None
+                elif i < riichi_idx:
+                    player['riichi_tile_index'] = riichi_idx - 1
             return
 
 def _expand_melds(player):
@@ -544,6 +566,11 @@ def handle_discard_tile(data):
     except ValueError:
         return
 
+    drawn_tile = current_player.get('drawn_tile')
+    if current_player.get('riichi') and drawn_tile is not None and tile_to_remove != drawn_tile:
+        # リーチ中はツモ切り（ツモった牌をそのまま切る）以外の打牌はできない
+        return
+
     _perform_discard(room, room_id, current_player, tile_to_remove)
 
 # ロンは即座に確定させず、3秒のロン受付ウィンドウが閉じるまで宣言を蓄積する（ダブロン・トリプルロン対応）。
@@ -663,7 +690,8 @@ def handle_action_pon(data):
         
         emit('system_msg', {'message': f"📣 ポン！ {clicker['name']} さんが{loser['name'] if loser else ''}から鳴きました"}, room=room_id)
     else:
-        emit('system_msg', {'message': f"❌ ポンできません"}, to=request.sid)
+        # 誤ポン（そもそも鳴ける牌が無いのに宣言した）：チョンボとして罰符を適用する
+        apply_chombo(room, room_id, clicker)
 
     broadcast_state(room_id)
 
@@ -696,13 +724,20 @@ def handle_action_kan(data):
             direction = _relative_direction(room, clicker, loser) if loser else '不明'
 
             clicker['melds'].append({'tile': target_tile, 'type': 'kan', 'from': direction})
-            
+
             room['current_turn'] = room['players'].index(clicker)
             if room['deck']:
-                clicker['hand'].append(room['deck'].pop())
+                drawn = room['deck'].pop()
+                clicker['hand'].append(drawn)
                 clicker['hand'].sort()
+                clicker['drawn_tile'] = drawn
             room['last_discard'] = None
             emit('system_msg', {'message': f"🔔 カン！ {clicker['name']} さんが{loser['name'] if loser else ''}から明槓しました"}, room=room_id)
+            broadcast_state(room_id)
+            return
+        else:
+            # 誤カン（そもそも明槓できる牌が無いのに宣言した）：チョンボとして罰符を適用する
+            apply_chombo(room, room_id, clicker)
             broadcast_state(room_id)
             return
 
@@ -712,19 +747,23 @@ def handle_action_kan(data):
             if clicker['hand'].count(t) == 4:
                 kan_tile = t
                 break
-        
+
         if kan_tile is not None:
             for _ in range(4):
                 clicker['hand'].remove(kan_tile)
             clicker['melds'].append({'tile': kan_tile, 'type': 'ankan', 'from': '自分'})
-            
+
             if room['deck']:
-                clicker['hand'].append(room['deck'].pop())
+                drawn = room['deck'].pop()
+                clicker['hand'].append(drawn)
                 clicker['hand'].sort()
+                clicker['drawn_tile'] = drawn
             emit('system_msg', {'message': f"🔔 カン！ {clicker['name']} さんが暗槓しました"}, room=room_id)
             broadcast_state(room_id)
         else:
-            emit('system_msg', {'message': f"❌ カンできる牌がありません"}, to=request.sid)
+            # 誤カン（そもそも暗槓できる牌が無いのに宣言した）：チョンボとして罰符を適用する
+            apply_chombo(room, room_id, clicker)
+            broadcast_state(room_id)
 
 @socketio.on('action_riichi')
 def handle_action_riichi(data):
@@ -747,6 +786,7 @@ def handle_action_riichi(data):
         return
 
     clicker['riichi'] = True
+    clicker['pending_riichi_discard'] = True
     emit('system_msg', {'message': f"❗ {clicker['name']} さんがリーチを宣言しました！"}, room=room_id)
     broadcast_state(room_id)
 
@@ -795,7 +835,8 @@ def broadcast_state(room_id):
                 'is_turn': (room['current_turn'] == other_idx) and (room['status'] == 'playing'),
                 'is_dealer': (other_idx == room.get('dealer_idx', 0)),
                 'disconnected': op.get('disconnected', False),
-                'riichi': op.get('riichi', False)
+                'riichi': op.get('riichi', False),
+                'riichi_tile_index': op.get('riichi_tile_index')
             })
 
         is_my_turn = (room['current_turn'] == idx) and (room['status'] == 'playing')
@@ -820,6 +861,8 @@ def broadcast_state(room_id):
             'my_is_dealer': (idx == room.get('dealer_idx', 0)),
             'my_riichi': target_player.get('riichi', False),
             'my_is_host': target_player.get('is_host', False),
+            'my_drawn_tile': target_player.get('drawn_tile'),
+            'my_riichi_tile_index': target_player.get('riichi_tile_index'),
             'others': others_info
         }, to=target_player['id'])
 

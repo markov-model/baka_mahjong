@@ -280,3 +280,169 @@ button:active { transform: translateY(0); }
         display: flex;
     }
 }
+
+/* ====================================================
+   📱 スマホ横向き時：タイトル等を削り、スクロールなしで
+   対局画面が画面内に収まるようコンパクト化する。
+   対局画面の要素の多くはJS側でインラインstyleを直接指定しているため、
+   ここでのみ !important で上書きしている。
+   ==================================================== */
+@media screen and (orientation: landscape) and (max-height: 520px) {
+    body {
+        padding: 4px !important;
+    }
+
+    h1 {
+        display: none !important;
+    }
+
+    #sound-control {
+        top: 4px !important;
+        right: 4px !important;
+    }
+
+    #sound-toggle-btn {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 12px !important;
+    }
+
+    #sound-panel {
+        margin-top: 4px !important;
+    }
+
+    .mahjong-table-grid {
+        grid-template-columns: 70px 1fr 70px !important;
+        gap: 2px !important;
+        padding: 2px !important;
+        border-width: 3px !important;
+        max-width: 100% !important;
+    }
+
+    .seat-top, .seat-right {
+        padding: 0 !important;
+    }
+
+    .seat-center {
+        padding: 2px !important;
+    }
+
+    .center-kawa-grid {
+        grid-template-columns: 56px 76px 56px !important;
+        grid-template-rows: auto 44px auto !important;
+        gap: 2px !important;
+        margin-top: 1px !important;
+        align-items: start !important;
+    }
+
+    .kawa-box {
+        min-height: 18px !important;
+        max-height: 22px !important;
+        overflow-y: auto !important;
+        padding: 1px !important;
+        width: auto !important;
+    }
+
+    /* 情報バー・手番ステータス文言・山札残り表示（インラインstyleの子要素）を圧縮する */
+    .seat-center > div:first-child {
+        padding: 2px 4px !important;
+        margin-bottom: 2px !important;
+    }
+    .seat-center > div:first-child * {
+        font-size: 9px !important;
+    }
+    .seat-center > div:nth-child(2) {
+        font-size: 9px !important;
+        margin-bottom: 2px !important;
+    }
+    [style*="grid-area: center-info"] {
+        padding: 2px !important;
+    }
+    [style*="grid-area: center-info"] * {
+        font-size: 8px !important;
+    }
+    [style*="grid-area: center-info"] div[style*="font-size:22px"] {
+        font-size: 14px !important;
+    }
+
+    .tile-my-hand {
+        width: 26px !important;
+        height: 36px !important;
+        font-size: 10px !important;
+        margin: 1px !important;
+    }
+
+    .tile-dora {
+        width: 16px !important;
+        height: 23px !important;
+        font-size: 8px !important;
+    }
+
+    .tile-kawa {
+        width: 13px !important;
+        height: 18px !important;
+        font-size: 6px !important;
+    }
+
+    .tile-hidden {
+        width: 11px !important;
+        height: 17px !important;
+        font-size: 6px !important;
+    }
+
+    .tile-v-hidden {
+        width: 17px !important;
+        height: 11px !important;
+        font-size: 5px !important;
+    }
+
+    .tile-meld {
+        width: 14px !important;
+        height: 19px !important;
+        font-size: 7px !important;
+    }
+
+    .tile-v-meld {
+        width: 19px !important;
+        height: 14px !important;
+        font-size: 6px !important;
+    }
+
+    .seat-bottom {
+        padding: 3px !important;
+    }
+    .seat-bottom > div:first-child {
+        margin-bottom: 2px !important;
+    }
+    .seat-bottom > div:first-child * {
+        font-size: 10px !important;
+    }
+
+    #my-hand-container {
+        margin-bottom: 2px !important;
+        gap: 1px !important;
+    }
+
+    #action-buttons-container {
+        gap: 2px !important;
+    }
+
+    #action-buttons-container button {
+        padding: 3px 6px !important;
+        font-size: 10px !important;
+    }
+
+    .seat-top > div, .seat-right > div {
+        padding: 2px !important;
+    }
+    .seat-top > div > div:first-child *,
+    .seat-right > div > div:first-child * {
+        font-size: 9px !important;
+    }
+
+    .win-modal-content,
+    .card {
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+}

@@ -982,9 +982,11 @@ function renderOpponentCard(op, positionLabel, isVertical = false) {
         ? meldGroups.map(m => renderMeldGroup(m, isVertical)).join('')
         : '';
 
+    // 対面(横並び)は折り返すと縦に伸びて画面(特にスマホ横向きの低い高さ)を圧迫するため、
+    // 折り返さず横スクロールにする（上家/下家の縦並びは元々 max-height+overflow-y で高さを制限済み）
     const containerStyle = isVertical
         ? 'display:flex; flex-direction:column; align-items:center; gap:2px; background:rgba(0,0,0,0.2); padding:4px; border-radius:4px; max-height:280px; overflow-y:auto;'
-        : 'display:flex; flex-wrap:wrap; align-items:center; gap:2px; background:rgba(0,0,0,0.2); padding:3px; border-radius:4px;';
+        : 'display:flex; flex-wrap:nowrap; overflow-x:auto; max-width:100%; align-items:center; gap:2px; background:rgba(0,0,0,0.2); padding:3px; border-radius:4px;';
 
     const meldDividerStyle = isVertical
         ? 'border-top:1px dashed #00b894; margin-top:4px; padding-top:4px; display:flex; flex-direction:column; align-items:center; flex-wrap:wrap;'
@@ -999,23 +1001,32 @@ function renderOpponentCard(op, positionLabel, isVertical = false) {
             <div style="font-size:11px; color:#00ffcc; margin-bottom:4px;">${op.score_str || op.score || 0}点</div>
             
             <div style="${containerStyle}">
-                <div style="display:flex; ${isVertical ? 'flex-direction:column;' : 'flex-wrap:wrap;'} gap:1px;">${hiddenHandHtml}</div>
+                <div style="display:flex; ${isVertical ? 'flex-direction:column;' : 'flex-wrap:nowrap;'} gap:1px;">${hiddenHandHtml}</div>
                 ${meldsHtml ? `<div style="${meldDividerStyle}">${meldsHtml}</div>` : ''}
             </div>
         </div>
     `;
 }
 
+// リーチ宣言牌（riichiTileIndex番目）だけ横向きに回して分かりやすくする
+function renderKawaTileList(kawaList, riichiTileIndex) {
+    return kawaList.map((t, i) => {
+        const isRiichiTile = (riichiTileIndex !== null && riichiTileIndex !== undefined && i === riichiTileIndex);
+        const style = isRiichiTile ? 'transform:rotate(90deg); margin:0 4px;' : '';
+        return `<div class="tile-card tile-kawa" style="${style}">${formatTile(t)}</div>`;
+    }).join('');
+}
+
 function renderKawaTiles(op) {
     if (!op) return '';
     const kawaList = parseTilesArray(op.kawa || op.discards || []);
-    return kawaList.map(t => `<div class="tile-card tile-kawa">${formatTile(t)}</div>`).join('');
+    return renderKawaTileList(kawaList, op.riichi_tile_index);
 }
 
 function renderKawaTilesSelf(state) {
     const rawKawa = state.my_kawa || state.kawa || state.discards || [];
     const kawaList = parseTilesArray(rawKawa);
-    return kawaList.map(t => `<div class="tile-card tile-kawa">${formatTile(t)}</div>`).join('');
+    return renderKawaTileList(kawaList, state.my_riichi_tile_index);
 }
 
 function renderMeldsTilesSelf(state) {
@@ -1027,23 +1038,51 @@ function renderMeldsTilesSelf(state) {
 
 
 function renderMyHandTiles(state) {
-    const myHand = parseTilesArray(state.my_hand || state.hand || []);
+    const myHand = parseTilesArray(state.my_hand || state.hand || []).slice();
     const isFrozen = state.status === 'game_over';
     const winningTile = isFrozen ? state.winning_tile : null;
     let winningTileMarked = false;
 
-    return myHand.map(tileNum => {
-        let highlightStyle = '';
+    // ツモった牌は手牌の並び（ソート済み）から抜き出し、右側に離して表示する
+    const drawnTile = (!isFrozen && state.my_drawn_tile !== undefined && state.my_drawn_tile !== null)
+        ? state.my_drawn_tile
+        : null;
+    let drawnIdx = -1;
+    if (drawnTile !== null) {
+        drawnIdx = myHand.findIndex(t => String(t) === String(drawnTile));
+    }
+    let drawnTileRemoved = null;
+    if (drawnIdx !== -1) {
+        drawnTileRemoved = myHand.splice(drawnIdx, 1)[0];
+    }
+
+    // リーチ中はツモ切り（ツモった牌をそのまま切る）以外選べないため、他の牌はクリック不可にする
+    const isRiichiLocked = Boolean(state.my_riichi) && drawnTileRemoved !== null;
+
+    const renderTile = (tileNum, { isDrawn = false, extraStyle = '' } = {}) => {
+        let highlightStyle = extraStyle;
         if (winningTile !== null && winningTile !== undefined && !winningTileMarked && String(tileNum) === String(winningTile)) {
             winningTileMarked = true;
-            highlightStyle = 'border:2px solid #ff4757; box-shadow:0 0 10px #ff4757; transform:translateY(-4px);';
+            highlightStyle += 'border:2px solid #ff4757; box-shadow:0 0 10px #ff4757; transform:translateY(-4px);';
         }
+        const locked = isRiichiLocked && !isDrawn;
+        if (locked) {
+            highlightStyle += 'opacity:0.35; cursor:not-allowed;';
+        }
+        const clickHandler = locked ? '' : 'onclick="handleTileClick(this)"';
         return `
-        <div class="tile-card tile-my-hand" style="${highlightStyle}" data-tile-val="${escapeHtml(String(tileNum))}" onclick="handleTileClick(this)">
+        <div class="tile-card tile-my-hand" style="${highlightStyle}" data-tile-val="${escapeHtml(String(tileNum))}" ${clickHandler}>
             ${formatTile(tileNum)}
         </div>
     `;
-    }).join('');
+    };
+
+    let html = myHand.map(t => renderTile(t)).join('');
+    if (drawnTileRemoved !== null) {
+        // 少し間を空けて分離し、ツモ牌だと分かるようにする
+        html += `<div style="width:8px;"></div>` + renderTile(drawnTileRemoved, { isDrawn: true, extraStyle: 'border-color:#00ffcc;' });
+    }
+    return html;
 }
 // script.js の適当な場所（末尾など）に追加
 
