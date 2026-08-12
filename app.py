@@ -85,6 +85,7 @@ def _deal_new_hand(room):
         p['rinshan_chance'] = False     # 槓の直後の嶺上牌をツモった直後かどうか（嶺上開花判定用）
         p['ippatsu_active'] = False     # リーチ後、一発が生きているか
         p['double_riichi'] = False      # ダブルリーチが成立しているか
+        p['temp_furiten'] = False       # 同巡内フリテン（ロンできたのに見送った）
 
     room['current_turn'] = room['dealer_idx']
     active_player = room['players'][room['current_turn']]
@@ -119,9 +120,10 @@ def _advance_to_next_hand(room, room_id):
     broadcast_state(room_id)
     _auto_discard_if_disconnected(room, room_id)
 
-def _check_tenpai(player):
-    """13枚の手牌（+副露）が聴牌かどうかを、1〜13の牌を1枚ずつ加えてアガリになるか総当たりで判定する"""
+def _get_winning_tiles(player):
+    """13枚の手牌（+副露）に対し、1〜13の牌を1枚ずつ加えてアガリになるものを総当たりで列挙する（＝待ち牌一覧）"""
     meld_tiles, kan_count, ankan_tiles, open_meld_tiles = _expand_melds(player)
+    winning = []
     for t in KOKUSHI_TILES:
         is_agari, _, _ = evaluate_hand(
             player['hand'] + [t],
@@ -131,8 +133,22 @@ def _check_tenpai(player):
             open_meld_tiles=open_meld_tiles
         )
         if is_agari:
-            return True
-    return False
+            winning.append(t)
+    return winning
+
+def _check_tenpai(player):
+    """聴牌しているかどうか（待ち牌が1つでもあるか）"""
+    return len(_get_winning_tiles(player)) > 0
+
+def _is_furiten(player):
+    """フリテン判定。以下のいずれかに該当すればロン不可（ツモは可能）：
+    ・自分の待ち牌が、これまでの自分の捨て牌の中に含まれている（一度でも該当するとその局の間ずっと有効）
+    ・直前の他家の捨て牌でロンできたのに見送った（同巡の一時的フリテン。次に自分が打牌するまで、
+      またはリーチ中はその局の間ずっと有効）"""
+    if player.get('temp_furiten'):
+        return True
+    winning_tiles = _get_winning_tiles(player)
+    return any(t in player['kawa'] for t in winning_tiles)
 
 def _reveal_riichi_hands(room, room_id):
     """流局時、リーチ宣言していた全プレイヤーの手牌を公開する。
@@ -285,6 +301,11 @@ def _perform_discard(room, room_id, player, tile_to_remove):
         # リーチ宣言牌以降の打牌＝次巡に入った、ということなので一発は消える
         player['ippatsu_active'] = False
 
+    if not player.get('riichi'):
+        # 同巡内フリテンは自分の打牌で解消する。ただしリーチ中は待ちを変えられないため
+        # 一度フリテンになったらその局の間ずっと有効（実際の麻雀のルール通り）
+        player['temp_furiten'] = False
+
     room['last_discard'] = tile_to_remove
     room['last_discard_player'] = player['id']
     room['ron_claims'] = []
@@ -308,6 +329,16 @@ def wait_and_advance(target_room_id, expected_seq):
         return
 
     if target_room['status'] == 'waiting_action' and target_room['discard_seq'] == expected_seq:
+        # ロンできたはずなのに見送った（宣言しなかった）プレイヤーは同巡内フリテンにする
+        discarded_tile = target_room['last_discard']
+        discarder_id = target_room['last_discard_player']
+        claimed_ids = {c['id'] for c in target_room.get('ron_claims', [])}
+        for p in target_room['players']:
+            if p['id'] == discarder_id or p['id'] in claimed_ids:
+                continue
+            if discarded_tile in _get_winning_tiles(p):
+                p['temp_furiten'] = True
+
         if target_room.get('ron_claims'):
             # ロン受付ウィンドウが閉じた：成立している宣言をまとめて精算する（ダブロン・トリプルロン対応）
             _finalize_ron_claims(target_room, target_room_id)
@@ -625,6 +656,11 @@ def handle_action_ron(data):
 
     if any(c['id'] == clicker['id'] for c in room.get('ron_claims', [])):
         return  # 二重宣言は無視
+
+    if _is_furiten(clicker):
+        # フリテン中はロンできない（チョンボにはならず、単に成立しない）
+        emit('system_msg', {'message': f"❌ {clicker['name']} さんはフリテンのためロンできません"}, to=request.sid)
+        return
 
     winning_tile = room['last_discard']
     meld_tiles, kan_count, ankan_tiles, open_meld_tiles = _expand_melds(clicker)
@@ -965,6 +1001,7 @@ def broadcast_state(room_id):
             'my_is_host': target_player.get('is_host', False),
             'my_drawn_tile': target_player.get('drawn_tile'),
             'my_riichi_tile_index': target_player.get('riichi_tile_index'),
+            'my_furiten': _is_furiten(target_player),
             'others': others_info
         }, to=target_player['id'])
 

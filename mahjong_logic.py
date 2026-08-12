@@ -57,6 +57,22 @@ TERMINAL_TILES = PINZU_TILES + SOUZU_TILES + MANZU_TILES  # このゲームで�
 WIND_NAMES = {7: '東', 8: '南', 9: '西', 10: '北'}
 DRAGON_NAMES = {11: '白', 12: '發', 13: '中'}
 
+# ドラ表示牌 → 実際のドラ牌への対応表。
+# 筒子/索子/萬子はこのゲームでは老頭（1・9）の2種類しか存在しないため、
+# その2種類の間で相互に（1↔9）循環する。風牌は東→南→西→北→東、
+# 三元牌は白→發→中→白の順（実際の麻雀のドラ表示と同じ考え方）。
+DORA_NEXT_TILE = {
+    1: 2, 2: 1,
+    3: 4, 4: 3,
+    5: 6, 6: 5,
+    7: 8, 8: 9, 9: 10, 10: 7,
+    11: 12, 12: 13, 13: 11,
+}
+
+def get_dora_tile(indicator):
+    """ドラ表示牌から実際のドラ牌を求める"""
+    return DORA_NEXT_TILE.get(indicator, indicator)
+
 YAKUMAN_BASE_SCORE = 32000  # 役満の基本点。ダブル役満=64000、トリプル=128000...と役満数ごとに倍になる
 
 def _regular_score(total_han):
@@ -303,7 +319,9 @@ def evaluate_hand(
         total_han += 1
         yaku.append("一発 (1翻)")
 
-    dora_count = sum(all_tiles.count(d_tile) for d_tile in dora_indicators)
+    # ドラ表示牌そのものではなく、その「次の牌」が実際のドラ
+    actual_dora_tiles = [get_dora_tile(ind) for ind in dora_indicators]
+    dora_count = sum(all_tiles.count(d_tile) for d_tile in actual_dora_tiles)
     if dora_count > 0:
         total_han += dora_count
         yaku.append(f"ドラ x{dora_count} ({dora_count}翻)")
