@@ -9,14 +9,33 @@
     --neon-glow: 0 0 10px rgba(0, 255, 204, 0.5);
 }
 
-body { 
+html {
+    /* iOSでピンチズームやダブルタップズームをしても崩れないよう、常にビューポート幅に合わせる */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    text-align: center; 
-    background: var(--bg-color); 
-    color: white; 
-    padding: 15px; 
-    margin: 0; 
-    user-select: none; 
+    text-align: center;
+    background: var(--bg-color);
+    color: white;
+    padding: 15px;
+    /* iPhoneのノッチ・ホームインジケーター部分にコンテンツが隠れないようにする */
+    padding-top: max(15px, env(safe-area-inset-top));
+    padding-right: max(15px, env(safe-area-inset-right));
+    padding-bottom: max(15px, env(safe-area-inset-bottom));
+    padding-left: max(15px, env(safe-area-inset-left));
+    margin: 0;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent; /* iOSでボタンタップ時に灰色のハイライトが一瞬光るのを防ぐ */
+    -webkit-touch-callout: none; /* 長押しでのコピー/画像保存メニューを抑止（誤操作防止） */
+}
+
+button, .tile-card {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation; /* iOSでのダブルタップズーム・タップ遅延を防ぐ */
 }
 
 h1 {
@@ -246,7 +265,10 @@ button:active { transform: translateY(0); }
 #rotate-device-overlay {
     display: none;
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     z-index: 99999;
     background: #0b1d13;
     color: #fff;

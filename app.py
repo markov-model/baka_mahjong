@@ -96,10 +96,21 @@ def _deal_new_hand(room):
         active_player['drawn_tile'] = drawn
 
 def _advance_to_next_hand(room, room_id):
-    """現在の局を終える。東風戦（参加人数分の局）を全て消化していれば対局終了、
-    そうでなければ親を次の席に送って新しい局を配る。
+    """現在の局を終える。親が連荘（自分の和了、または流局時に聴牌）していれば
+    同じ親のまま本場だけ増やして局を続ける。そうでなければ親を次の席に送り、
+    東風戦（参加人数分の局）を全て消化していれば対局終了とする。
     スレッド（山切れによる流局）からも呼ばれるため、socketio.emit のみを使う。"""
+    if room.get('renchan'):
+        room['honba'] = room.get('honba', 0) + 1
+        _deal_new_hand(room)
+        honba_text = f" {room['honba']}本場" if room['honba'] > 0 else ""
+        socketio.emit('system_msg', {'message': f"🔄 親継続！ 東{room.get('hand_number', 1)}局{honba_text}が始まります！"}, room=room_id)
+        broadcast_state(room_id)
+        _auto_discard_if_disconnected(room, room_id)
+        return
+
     room['hand_number'] = room.get('hand_number', 1) + 1
+    room['honba'] = 0
     max_hands = room.get('max_hands', len(room['players']))
 
     if room['hand_number'] > max_hands:
@@ -170,6 +181,7 @@ def _handle_exhaustive_draw(room, room_id):
     スレッド（wait_and_advance）から呼ばれるため socketio.emit のみを使う。"""
     room['status'] = 'game_over'
     room['winning_tile'] = None
+    dealer_id = room['players'][room.get('dealer_idx', 0)]['id']
 
     riichi_reveal = _reveal_riichi_hands(room, room_id)
 
@@ -178,6 +190,7 @@ def _handle_exhaustive_draw(room, room_id):
 
     if nagashi_players:
         nagashi_ids = {p['id'] for p in nagashi_players}
+        room['renchan'] = dealer_id in nagashi_ids  # 親が流しマンガン成立＝連荘
         score = NAGASHI_MANGAN_SCORE
         other_count = max(1, len(room['players']) - 1)
 
@@ -205,6 +218,7 @@ def _handle_exhaustive_draw(room, room_id):
         tenpai_players = [p for p in room['players'] if _check_tenpai(p)]
         tenpai_ids = {p['id'] for p in tenpai_players}
         noten_players = [p for p in room['players'] if p['id'] not in tenpai_ids]
+        room['renchan'] = dealer_id in tenpai_ids  # 親が聴牌のまま流局＝連荘
 
         if tenpai_players and noten_players:
             pay_each = NOTEN_PENALTY_TOTAL // len(noten_players)
@@ -257,6 +271,9 @@ def _finalize_ron_claims(room, room_id):
         })
 
     room['winning_tile'] = winning_tile if winners_payload else None
+
+    dealer_id = room['players'][room.get('dealer_idx', 0)]['id']
+    room['renchan'] = any(claim['id'] == dealer_id for claim in claims)
 
     if len(winners_payload) >= 2:
         names = '・'.join(w['winner'] for w in winners_payload)
@@ -592,6 +609,8 @@ def handle_start_game(data):
     room['dealer_idx'] = 0
     room['hand_number'] = 1
     room['max_hands'] = len(room['players'])
+    room['honba'] = 0
+    room['renchan'] = False
     _assign_winds(room)
     _deal_new_hand(room)
 
@@ -733,6 +752,7 @@ def handle_action_tsumo(data):
 
     if is_agari:
         room['status'] = 'game_over'
+        room['renchan'] = is_dealer  # 親が自分でツモった＝連荘
 
         # ツモアガリ：他家全員から点数を均等徴収（簡易的に総スコアを加算）
         other_count = len(room['players']) - 1
@@ -860,6 +880,14 @@ def handle_action_kan(data):
                 kan_tile = t
                 break
 
+        # 加槓：既にポンしている牌と同じ牌を、今の手牌からもう1枚足してカンに昇格させる
+        kakan_meld = None
+        if kan_tile is None:
+            kakan_meld = next(
+                (m for m in clicker['melds'] if m['type'] == 'pon' and m['tile'] in clicker['hand']),
+                None
+            )
+
         if kan_tile is not None:
             for _ in range(4):
                 clicker['hand'].remove(kan_tile)
@@ -876,8 +904,23 @@ def handle_action_kan(data):
                 room['dora_indicators'].append(room['deck'].pop())
             emit('system_msg', {'message': f"🔔 カン！ {clicker['name']} さんが暗槓しました"}, room=room_id)
             broadcast_state(room_id)
+        elif kakan_meld is not None:
+            clicker['hand'].remove(kakan_meld['tile'])
+            kakan_meld['type'] = 'kan'  # ポン済みの副露をカンへ昇格（明槓と同じ扱い）
+
+            if room['deck']:
+                drawn = room['deck'].pop()
+                clicker['hand'].append(drawn)
+                clicker['hand'].sort()
+                clicker['drawn_tile'] = drawn
+                clicker['rinshan_chance'] = True  # 嶺上牌をツモった直後（嶺上開花のチャンス）
+            if room['deck']:
+                # カンドラ：新しいドラ表示牌をめくる
+                room['dora_indicators'].append(room['deck'].pop())
+            emit('system_msg', {'message': f"🔔 カン！ {clicker['name']} さんが加槓しました"}, room=room_id)
+            broadcast_state(room_id)
         else:
-            # 誤カン（そもそも暗槓できる牌が無いのに宣言した）：チョンボとして罰符を適用する
+            # 誤カン（そもそも暗槓・加槓できる牌が無いのに宣言した）：チョンボとして罰符を適用する
             apply_chombo(room, room_id, clicker)
             broadcast_state(room_id)
 
@@ -985,6 +1028,7 @@ def broadcast_state(room_id):
             'status': room['status'],
             'hand_number': room.get('hand_number', 1),
             'max_hands': room.get('max_hands', len(room['players'])),
+            'honba': room.get('honba', 0),
             'deck_count': len(room['deck']),
             'dora_indicators': room['dora_indicators'],
             'last_discard': room['last_discard'],

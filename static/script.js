@@ -18,6 +18,20 @@ const TILE_MAP = {
     11: "白", 12: "發", 13: "中"
 };
 
+// 牌の種類ごとに文字色を分ける：ぴんず(筒子)=青、そうず(索子)=緑、まんず(萬子)=赤。
+// 風牌・三元牌は既定色のまま。
+function getTileColor(tile) {
+    let num = tile;
+    if (typeof tile === 'object' && tile !== null) {
+        num = tile.tile ?? tile.id ?? tile.value;
+    }
+    num = parseInt(String(num).replace(/[^0-9]/g, ''), 10);
+    if (num === 1 || num === 2) return '#1565c0';  // ぴんず = 青
+    if (num === 3 || num === 4) return '#2e7d32';  // そうず = 緑
+    if (num === 5 || num === 6) return '#c62828';  // まんず = 赤
+    return '';
+}
+
 function formatTile(tile) {
     if (tile === null || tile === undefined || tile === '') return '';
     if (typeof tile === 'object' && tile !== null) {
@@ -800,17 +814,19 @@ socket.on('state_update', (state) => {
     }
 
     const doraList = parseTilesArray(state.dora_indicators || []);
-    const doraHtml = doraList.length > 0 
-        ? doraList.map(t => `<div class="tile-card tile-dora">${formatTile(t)}</div>`).join('')
+    const doraHtml = doraList.length > 0
+        ? doraList.map(t => `<div class="tile-card tile-dora" style="color:${getTileColor(t)}">${formatTile(t)}</div>`).join('')
         : '<span style="color:#888;">--</span>';
 
     const deckCount = state.deck_count !== undefined ? state.deck_count : 0;
     const lastDiscardTile = state.last_discard ? formatTile(state.last_discard) : null;
+    const lastDiscardColor = state.last_discard !== null && state.last_discard !== undefined ? getTileColor(state.last_discard) : '';
     const isWaitingAction = Boolean(state.is_waiting_action || state.waiting_action);
     const isGameOver = state.status === 'game_over';
     const isMatchOver = state.status === 'match_over';
     const handNumber = state.hand_number || 1;
     const maxHands = state.max_hands || 1;
+    const honba = state.honba || 0;
 
     // 対局終了モーダルは新しい局・新しい対局が始まったら自動で閉じる
     if (state.status === 'playing') {
@@ -842,7 +858,7 @@ socket.on('state_update', (state) => {
             <div class="seat-center">
                 <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.5); padding:6px 12px; border-radius:8px; border:1px solid rgba(255,215,0,0.2); margin-bottom:8px;">
                     <div style="font-size:12px; color:#ccc;">部屋: <strong style="color:#ffd700;">${state.room_id || ''}</strong></div>
-                    <div style="font-size:13px; font-weight:bold; color:#ff7675;">東${handNumber}局 <span style="font-size:10px; color:#aaa; font-weight:normal;">(全${maxHands}局)</span></div>
+                    <div style="font-size:13px; font-weight:bold; color:#ff7675;">東${handNumber}局${honba > 0 ? `<span style="color:#ffd700;"> ${honba}本場</span>` : ''} <span style="font-size:10px; color:#aaa; font-weight:normal;">(全${maxHands}局)</span></div>
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:12px; font-weight:bold; color:#ffd700;">🀄 ドラ:</span>
                         <div style="display:flex; flex-wrap:wrap; gap:2px;">${doraHtml}</div>
@@ -866,7 +882,7 @@ socket.on('state_update', (state) => {
                         
                         ${lastDiscardTile ? `
                             <div style="margin-top:4px; font-size:9px; color:#ff4757; font-weight:bold;">ロン/鳴き対象</div>
-                            <div class="tile-card tile-dora last-discard-highlight" style="width:20px; height:28px; font-size:10px;">${lastDiscardTile}</div>
+                            <div class="tile-card tile-dora last-discard-highlight" style="width:20px; height:28px; font-size:10px; color:${lastDiscardColor};">${lastDiscardTile}</div>
                             
                             <div style="width:80%; height:5px; background:#333; border-radius:3px; margin-top:6px; overflow:hidden;">
                                 <div id="action-timer-fill" class="timer-bar-fill"></div>
@@ -949,13 +965,14 @@ function renderMeldGroup(meld, isVertical) {
     const count = meldTileCount(type);
 
     const tileClass = isVertical ? 'tile-v-meld' : 'tile-meld';
+    const meldColor = getTileColor(tileVal);
     let tilesHtml = '';
     for (let i = 0; i < count; i++) {
         // 鳴いた元の牌(1枚目)を回転させ、どこから取ったかを分かりやすくする
         const rotateStyle = (!isAnkan && i === 0)
             ? (isVertical ? 'transform:rotate(90deg); margin:2px 0;' : 'transform:rotate(90deg); margin:0 3px;')
             : '';
-        tilesHtml += `<div class="${tileClass}" style="${rotateStyle}">${isAnkan && (i === 0 || i === count - 1) ? '🀫' : formatTile(tileVal)}</div>`;
+        tilesHtml += `<div class="${tileClass}" style="${rotateStyle} color:${meldColor};">${isAnkan && (i === 0 || i === count - 1) ? '🀫' : formatTile(tileVal)}</div>`;
     }
 
     const badgeText = isAnkan ? '暗槓' : (fromLabel || '');
@@ -1017,7 +1034,7 @@ function renderKawaTileList(kawaList, riichiTileIndex) {
     return kawaList.map((t, i) => {
         const isRiichiTile = (riichiTileIndex !== null && riichiTileIndex !== undefined && i === riichiTileIndex);
         const style = isRiichiTile ? 'transform:rotate(90deg); margin:0 4px;' : '';
-        return `<div class="tile-card tile-kawa" style="${style}">${formatTile(t)}</div>`;
+        return `<div class="tile-card tile-kawa" style="${style} color:${getTileColor(t)};">${formatTile(t)}</div>`;
     }).join('');
 }
 
@@ -1067,7 +1084,7 @@ function renderMyHandTiles(state) {
     const isRiichiLocked = Boolean(state.my_riichi) && !hasDeclaredButNotDiscarded && drawnTileRemoved !== null;
 
     const renderTile = (tileNum, { isDrawn = false, extraStyle = '' } = {}) => {
-        let highlightStyle = extraStyle;
+        let highlightStyle = `color:${getTileColor(tileNum)}; ${extraStyle}`;
         if (winningTile !== null && winningTile !== undefined && !winningTileMarked && String(tileNum) === String(winningTile)) {
             winningTileMarked = true;
             highlightStyle += 'border:2px solid #ff4757; box-shadow:0 0 10px #ff4757; transform:translateY(-4px);';
@@ -1124,7 +1141,7 @@ socket.on('win_result', (data) => {
 
     if (details) {
         const winningTileHtml = (data.winning_tile !== undefined && data.winning_tile !== null)
-            ? `<div><strong>和了牌:</strong> ${escapeHtml(formatTile(data.winning_tile))}</div>`
+            ? `<div><strong>和了牌:</strong> <span style="color:${getTileColor(data.winning_tile)};">${escapeHtml(formatTile(data.winning_tile))}</span></div>`
             : '';
 
         if (isMulti) {
@@ -1206,7 +1223,7 @@ function showDrawResultModal(data) {
                             : '<span style="background:#d63031;color:#fff;font-size:11px;padding:2px 6px;border-radius:8px;font-weight:bold;">🚨 ノーテン・チョンボ</span>'}
                     </div>
                     <div style="display:flex; flex-wrap:wrap; gap:2px;">
-                        ${(r.hand || []).map(t => `<div class="tile-card tile-kawa">${formatTile(t)}</div>`).join('')}
+                        ${(r.hand || []).map(t => `<div class="tile-card tile-kawa" style="color:${getTileColor(t)};">${formatTile(t)}</div>`).join('')}
                     </div>
                 </div>
             `).join('')}
