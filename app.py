@@ -395,16 +395,38 @@ def handle_create_room(data):
 def handle_join_room(data):
     username = data.get('username', 'ゲスト')
     room_id = data.get('room_id', '').upper()
-    
+
     if room_id not in rooms:
         emit('error_msg', {'message': 'ルームが見つかりません'})
         return
-        
+
     room = rooms[room_id]
+
+    # 再接続：同名かつ切断中の既存プレイヤーがいれば、新規プレイヤーとして追加せず
+    # そのプレイヤー席に復帰させる（新しいsidへ差し替え、席・手牌・得点はそのまま維持）
+    reconnecting_player = next(
+        (p for p in room['players'] if p['name'] == username and p.get('disconnected')),
+        None
+    )
+    if reconnecting_player:
+        reconnecting_player['id'] = request.sid
+        reconnecting_player['disconnected'] = False
+        join_room(room_id)
+        emit('room_joined', {'room_id': room_id, 'is_host': reconnecting_player['is_host']})
+        socketio.emit('system_msg', {'message': f"🔄 {username} さんが再接続しました"}, room=room_id)
+        broadcast_state(room_id)
+        return
+
+    if room['status'] != 'waiting':
+        # 再接続（同名かつ切断中）以外の新規参加は、対局が始まっている部屋では受け付けない。
+        # 受け付けてしまうと座席インデックスに依存した進行ロジックが壊れる。
+        emit('error_msg', {'message': 'この部屋は既に対局中です'})
+        return
+
     if len(room['players']) >= 4:
         emit('error_msg', {'message': '満員です'})
         return
-        
+
     winds = ['東', '南', '西', '北']
     current_count = len(room['players'])
     
@@ -446,6 +468,16 @@ def handle_disconnect():
             # 対局中：current_turn/dealer_idx が座席インデックス依存のため除名せず、
             # 切断フラグのみ立てて手番が来たら自動打牌に切り替える
             player['disconnected'] = True
+
+            if player['is_host']:
+                # ホストが対局中に切断：他の接続中プレイヤーへホスト権限を移す
+                # （移らないと対局終了後、誰も「次の対局を始める」を押せなくなる）
+                successor = next((p for p in room['players'] if not p.get('disconnected')), None)
+                if successor:
+                    player['is_host'] = False
+                    successor['is_host'] = True
+                    socketio.emit('system_msg', {'message': f"👑 ホストが切断したため、{successor['name']} さんがホストを引き継ぎました"}, room=room_id)
+
             socketio.emit('system_msg', {'message': f"⚠️ {player['name']} さんが切断しました（自動打牌に切り替わります）"}, room=room_id)
             broadcast_state(room_id)
             _auto_discard_if_disconnected(room, room_id)
@@ -776,6 +808,7 @@ def broadcast_state(room_id):
             'my_wind': target_player['wind'],
             'my_is_dealer': (idx == room.get('dealer_idx', 0)),
             'my_riichi': target_player.get('riichi', False),
+            'my_is_host': target_player.get('is_host', False),
             'others': others_info
         }, to=target_player['id'])
 

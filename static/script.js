@@ -3,6 +3,7 @@ let currentRoomId = "";
 let isHost = false;
 let isMyTurn = false;
 let actionTimer = null;
+let myUsername = "";
 
 // ====================================================
 // 🀄 1. 牌の表示マッピング & 変換関数
@@ -181,8 +182,69 @@ function injectMahjongStyles() {
             width: 100%;
             border-radius: 3px;
         }
+
+        .toast-container {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            pointer-events: none;
+            width: 90%;
+            max-width: 480px;
+        }
+
+        .toast-item {
+            background: rgba(10, 25, 18, 0.95);
+            border: 1px solid rgba(0, 255, 204, 0.35);
+            color: #fff;
+            font-size: 13px;
+            font-weight: bold;
+            padding: 8px 16px;
+            border-radius: 20px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            text-align: center;
+        }
+
+        .toast-item.toast-show {
+            opacity: 1;
+            transform: translateY(0);
+        }
     `;
     document.head.appendChild(style);
+}
+
+// ====================================================
+// 🔔 2.5 システムメッセージのトースト表示
+// ====================================================
+function showToast(message) {
+    injectMahjongStyles();
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'toast-item';
+    toast.innerText = message;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => toast.classList.add('toast-show'));
+
+    setTimeout(() => {
+        toast.classList.remove('toast-show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3500);
 }
 
 // ====================================================
@@ -266,11 +328,56 @@ window.handleTileClick = function(elem) {
 };
 
 // ====================================================
+// 🔌 4.5 再接続（画面ロック/アプリ切り替え対策）
+// ====================================================
+// スマホの画面ロックやアプリ切り替えで接続が切れても、同じ部屋・同じ名前で
+// 復帰できるように、プレイヤー名と部屋コードを保持しておく。
+// ※ localStorage は同一オリジンの全タブ/全ウィンドウで共有されてしまい、
+//   「別タブを新しく開いただけで直前の部屋へ勝手に再参加してしまう」事故の元になるため、
+//   タブ単位で分離される sessionStorage を使う（ページの再読み込みには問題なく残る）。
+function persistSession(username, roomId) {
+    try {
+        sessionStorage.setItem('mahjong_username', username);
+        sessionStorage.setItem('mahjong_room_id', roomId);
+    } catch (e) { /* sessionStorageが使えない環境では何もしない */ }
+}
+
+function clearSession() {
+    try {
+        sessionStorage.removeItem('mahjong_username');
+        sessionStorage.removeItem('mahjong_room_id');
+    } catch (e) {}
+}
+
+// Socket.IOが（再読み込みなしでも）接続/再接続した際に呼ばれる。
+// 直前に参加していた部屋があれば、そこへの復帰を試みる。
+function attemptRejoin() {
+    let username = myUsername;
+    let roomId = currentRoomId;
+    if (!username || !roomId) {
+        try {
+            username = username || sessionStorage.getItem('mahjong_username');
+            roomId = roomId || sessionStorage.getItem('mahjong_room_id');
+        } catch (e) {}
+    }
+    if (username && roomId) {
+        myUsername = username;
+        socket.emit('join_room', { username: username, room_id: roomId });
+    }
+}
+
+socket.on('connect', () => {
+    attemptRejoin();
+});
+
+// ====================================================
 // 🎮 5. エントリー操作 & Socket.IO
 // ====================================================
 function createRoom() {
     clearError();
     const username = getInputValue(['username', 'user-name', 'player-name', 'name']);
+    myUsername = username;
+    clearSession(); // 新規に部屋を立てる＝古い再接続情報は破棄する
     socket.emit('create_room', { username: username });
 }
 
@@ -282,6 +389,7 @@ function joinRoom() {
         showError('4桁のルームコードを入力してください');
         return;
     }
+    myUsername = username;
     socket.emit('join_room', { username: username, room_id: code });
 }
 
@@ -295,6 +403,7 @@ function startGame() {
 socket.on('room_joined', (data) => {
     currentRoomId = data.room_id;
     isHost = data.is_host;
+    persistSession(myUsername, currentRoomId);
     const screenEntry = getElementByCandidates(['screen-entry', 'entry-screen']);
     const screenWaiting = getElementByCandidates(['screen-waiting', 'waiting-screen']);
     const displayRoomCode = getElementByCandidates(['display-room-code', 'room-code-display']);
@@ -334,6 +443,7 @@ socket.on('error_msg', (data) => showError(data.message));
 socket.on('system_msg', (data) => {
     console.log("💬 [system_msg]:", data.message);
     playActionSound();
+    showToast(data.message);
 });
 
 // ====================================================
@@ -349,6 +459,9 @@ socket.on('state_update', (state) => {
     if (screenGame) screenGame.style.display = 'block';
 
     isMyTurn = Boolean(state.is_my_turn || state.is_turn || state.my_turn);
+    if (typeof state.my_is_host === 'boolean') {
+        isHost = state.my_is_host; // ホストが対局中に切断した場合など、サーバー側の再割当をここで反映する
+    }
 
     const others = state.others || [];
     let playerTop = null, playerLeft = null, playerRight = null;
