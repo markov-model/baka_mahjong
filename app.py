@@ -34,9 +34,10 @@ CHOMBO_PENALTY = 32000      # チョンボ罰符: 役満と同スケール
 NAGASHI_MANGAN_SCORE = 8000  # 流しマンガンは満貫相当
 NOTEN_PENALTY_TOTAL = 3000   # 流局時のテンパイ料（聴牌者で総取り、ノーテン者で均等負担）
 
-def create_initial_deck():
-    # 1〜13筒 x 16枚 = 計208枚
-    deck = [tile for tile in KOKUSHI_TILES for _ in range(16)]
+def create_initial_deck(num_players=4):
+    # 52枚×人数分（1種類あたり 4×人数枚）。4人なら従来通り 13種 x 16枚 = 208枚
+    copies_per_tile = 4 * max(1, num_players)
+    deck = [tile for tile in KOKUSHI_TILES for _ in range(copies_per_tile)]
     random.shuffle(deck)
     return deck
 
@@ -61,7 +62,7 @@ def _assign_winds(room):
 def _deal_new_hand(room):
     """山をシャッフルし直し、現在の dealer_idx を起家として配牌する"""
     room['status'] = 'playing'
-    room['deck'] = create_initial_deck()
+    room['deck'] = create_initial_deck(len(room['players']))
     room['dora_indicators'] = [room['deck'].pop()] if room['deck'] else []
     room['last_discard'] = None
     room['last_discard_player'] = None
@@ -596,8 +597,15 @@ def handle_discard_tile(data):
         return
 
     drawn_tile = current_player.get('drawn_tile')
-    if current_player.get('riichi') and drawn_tile is not None and tile_to_remove != drawn_tile:
-        # リーチ中はツモ切り（ツモった牌をそのまま切る）以外の打牌はできない
+    # リーチ中はツモ切り（ツモった牌をそのまま切る）のみ許可する。
+    # ただし「リーチ宣言直後、まだ何も切っていない最初の1回」だけは、
+    # どの牌を切るか自由に選べる（riichi_tile_index が None＝まだ宣言牌を切っていない状態）
+    is_riichi_locked = (
+        current_player.get('riichi')
+        and current_player.get('riichi_tile_index') is not None
+        and drawn_tile is not None
+    )
+    if is_riichi_locked and tile_to_remove != drawn_tile:
         return
 
     _perform_discard(room, room_id, current_player, tile_to_remove)
@@ -862,6 +870,26 @@ def handle_action_riichi(data):
     # ダブルリーチ：自分がまだ一度も打牌しておらず(=最初の手番)、かつ誰の鳴きも発生していなければ成立
     clicker['double_riichi'] = (len(clicker['kawa']) == 0 and not room.get('any_call_happened'))
     emit('system_msg', {'message': f"❗ {clicker['name']} さんがリーチを宣言しました！"}, room=room_id)
+    broadcast_state(room_id)
+
+@socketio.on('action_cancel_riichi')
+def handle_action_cancel_riichi(data):
+    """リーチ宣言の取り消し。宣言牌（リーチ後最初の打牌）をまだ切っていない間だけ可能。
+    一度でも打牌してしまうと riichi_tile_index が確定するため、それ以降は取り消せない。"""
+    room_id = data.get('room_id')
+    room = rooms.get(room_id)
+    if not room:
+        return
+
+    clicker = next((p for p in room['players'] if p['id'] == request.sid), None)
+    if not clicker or not clicker.get('riichi') or clicker.get('riichi_tile_index') is not None:
+        return
+
+    clicker['riichi'] = False
+    clicker['pending_riichi_discard'] = False
+    clicker['ippatsu_active'] = False
+    clicker['double_riichi'] = False
+    emit('system_msg', {'message': f"↩️ {clicker['name']} さんがリーチを取り消しました"}, room=room_id)
     broadcast_state(room_id)
 
 @socketio.on('action_chombo')

@@ -314,10 +314,11 @@ function injectMahjongStyles() {
             padding: 4px;
             width: 126px;
             min-height: 60px;
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
             gap: 1px;
             align-content: flex-start;
+            justify-items: center;
             border: 1px dashed rgba(255,255,255,0.15);
             box-sizing: border-box;
         }
@@ -909,6 +910,9 @@ socket.on('state_update', (state) => {
                         <button onclick="playSe('click'); socket.emit('reset_game', {room_id: currentRoomId})" style="background:#00b894; color:#fff; border:none; padding:10px 22px; border-radius:6px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 0 12px rgba(0,184,148,0.6);">🔄 次の局へ</button>
                     ` : `
                         <button onclick="playSe('riichi'); socket.emit('action_riichi', {room_id: currentRoomId})" ${state.my_riichi ? 'disabled' : ''} style="background:${state.my_riichi ? '#555' : '#d63031'}; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:${state.my_riichi ? 'default' : 'pointer'}; opacity:${state.my_riichi ? '0.6' : '1'};">❗ ${state.my_riichi ? 'リーチ中' : 'リーチ'}</button>
+                        ${(state.my_riichi && (state.my_riichi_tile_index === null || state.my_riichi_tile_index === undefined)) ? `
+                            <button onclick="playSe('click'); socket.emit('action_cancel_riichi', {room_id: currentRoomId})" style="background:#636e72; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">↩️ リーチ取消</button>
+                        ` : ''}
                         <button onclick="playSe('pon'); socket.emit('action_pon', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">📣 ポン</button>
                         <button onclick="playSe('kan'); socket.emit('action_kan', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🔔 カン</button>
                         <button onclick="socket.emit('action_tsumo', {room_id: currentRoomId})" style="background:#e17055; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ツモ！</button>
@@ -1056,8 +1060,11 @@ function renderMyHandTiles(state) {
         drawnTileRemoved = myHand.splice(drawnIdx, 1)[0];
     }
 
-    // リーチ中はツモ切り（ツモった牌をそのまま切る）以外選べないため、他の牌はクリック不可にする
-    const isRiichiLocked = Boolean(state.my_riichi) && drawnTileRemoved !== null;
+    // リーチ中はツモ切り（ツモった牌をそのまま切る）以外選べないため、他の牌はクリック不可にする。
+    // ただし「リーチ宣言直後、まだ宣言牌を切っていない最初の1回」だけは自由に選べる
+    // （my_riichi_tile_index が null/undefined＝まだ宣言牌を切っていない状態）
+    const hasDeclaredButNotDiscarded = state.my_riichi_tile_index === null || state.my_riichi_tile_index === undefined;
+    const isRiichiLocked = Boolean(state.my_riichi) && !hasDeclaredButNotDiscarded && drawnTileRemoved !== null;
 
     const renderTile = (tileNum, { isDrawn = false, extraStyle = '' } = {}) => {
         let highlightStyle = extraStyle;
