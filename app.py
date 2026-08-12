@@ -40,7 +40,7 @@ bug_reports = []
 
 def create_initial_deck(num_players=4):
     # 52枚×人数分（1種類あたり 4×人数枚）。4人なら従来通り 13種 x 16枚 = 208枚
-    copies_per_tile = 52#4 * max(1, num_players)
+    copies_per_tile = 4 * max(1, num_players)
     deck = [tile for tile in KOKUSHI_TILES for _ in range(copies_per_tile)]
     random.shuffle(deck)
     return deck
