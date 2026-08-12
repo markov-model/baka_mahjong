@@ -1222,8 +1222,18 @@ socket.on('win_result', (data) => {
             ? `<div><strong>和了牌:</strong> <span style="color:${getTileColor(data.winning_tile)};">${escapeHtml(formatTile(data.winning_tile))}</span></div>`
             : '';
 
-        const handTilesHtml = (hand, melds) => {
-            const handHtml = (hand || []).map(t => `<div class="tile-card tile-kawa" style="color:${getTileColor(t)};">${formatTile(t)}</div>`).join('');
+        // 和了牌は手牌グリッドの中でも他と区別できるよう、金枠＋背景色でハイライトする
+        // （同じ牌が複数枚あっても、最後の1枚だけをその和了牌とみなして目立たせる）
+        const handTilesHtml = (hand, melds, winningTile) => {
+            const list = hand || [];
+            const winIdx = (winningTile !== undefined && winningTile !== null) ? list.lastIndexOf(winningTile) : -1;
+            const handHtml = list.map((t, i) => {
+                const isWinTile = i === winIdx;
+                const style = isWinTile
+                    ? `color:${getTileColor(t)}; border:2px solid #ffd700; background:rgba(255,215,0,0.18); box-shadow:0 0 8px rgba(255,215,0,0.6);`
+                    : `color:${getTileColor(t)};`;
+                return `<div class="tile-card tile-kawa" style="${style}" title="${isWinTile ? '和了牌' : ''}">${formatTile(t)}</div>`;
+            }).join('');
             const meldsHtml = (melds || []).map(m => `<div class="tile-card tile-kawa" style="color:${getTileColor(m.tile)}; border-color:#00b894;">${formatTile(m.tile)}</div>`).join('');
             return `<div style="display:flex; flex-wrap:wrap; gap:2px; margin-top:4px;">${handHtml}${meldsHtml}</div>`;
         };
@@ -1235,7 +1245,7 @@ socket.on('win_result', (data) => {
                     <div style="margin-top:10px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.15);">
                         <div><strong>勝者:</strong> ${escapeHtml(w.winner)} <span style="color:#00ffcc; font-weight:bold;">(+${escapeHtml(w.score_str)}点)</span></div>
                         <div style="margin-top:4px;"><strong>成立役:</strong><br>・${yakuList}</div>
-                        ${handTilesHtml(w.hand, w.melds)}
+                        ${handTilesHtml(w.hand, w.melds, data.winning_tile)}
                     </div>
                 `;
             }).join('');
@@ -1251,7 +1261,7 @@ socket.on('win_result', (data) => {
                 <div><strong>和了方:</strong> ${escapeHtml(data.type)} (放銃者: ${escapeHtml(data.loser)})</div>
                 ${winningTileHtml}
                 <div style="margin-top: 8px;"><strong>成立役:</strong><br>・${yakuList}</div>
-                ${handTilesHtml(data.hand, data.melds)}
+                ${handTilesHtml(data.hand, data.melds, data.winning_tile)}
             `;
         }
     }

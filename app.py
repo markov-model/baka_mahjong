@@ -861,6 +861,7 @@ def handle_action_tsumo(data):
             'yaku': yaku,
             'score_str': format_big_number(score),
             'type': 'ツモ',
+            'winning_tile': current_player.get('drawn_tile'),
             'hand': list(current_player['hand']),
             'melds': [dict(m) for m in current_player['melds']]
         }, room=room_id)
