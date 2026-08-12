@@ -25,6 +25,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 rooms = {}
 KOKUSHI_TILES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+WIND_TO_TILE = {'東': 7, '南': 8, '西': 9, '北': 10}
+ROUND_WIND_TILE = 7  # 東風戦なので場風は常に東
 
 # 得点スケール（実際の麻雀に近いスケール）
 INITIAL_SCORE = 100000      # 初期持ち点: 10万点
@@ -66,6 +68,8 @@ def _deal_new_hand(room):
     room['discard_seq'] = 0
     room['winning_tile'] = None
     room['ron_claims'] = []
+    room['any_call_happened'] = False    # ポン/明槓が一度でも成立したか（ダブルリーチ・天和地和人和の判定用）
+    room['first_decision_pending'] = True  # まだ誰も打牌していない（天和判定用）
 
     for p in room['players']:
         p['hand'] = [room['deck'].pop() for _ in range(13)]
@@ -77,6 +81,9 @@ def _deal_new_hand(room):
         p['drawn_tile'] = None          # 直近でツモった牌（河・手牌表示のツモ切り判定用）
         p['pending_riichi_discard'] = False  # リーチ宣言直後の次の打牌かどうか
         p['riichi_tile_index'] = None   # 河の中でリーチ宣言牌にあたるインデックス（横向き表示用）
+        p['rinshan_chance'] = False     # 槓の直後の嶺上牌をツモった直後かどうか（嶺上開花判定用）
+        p['ippatsu_active'] = False     # リーチ後、一発が生きているか
+        p['double_riichi'] = False      # ダブルリーチが成立しているか
 
     room['current_turn'] = room['dealer_idx']
     active_player = room['players'][room['current_turn']]
@@ -113,9 +120,15 @@ def _advance_to_next_hand(room, room_id):
 
 def _check_tenpai(player):
     """13枚の手牌（+副露）が聴牌かどうかを、1〜13の牌を1枚ずつ加えてアガリになるか総当たりで判定する"""
-    meld_tiles, kan_count = _expand_melds(player)
+    meld_tiles, kan_count, ankan_tiles, open_meld_tiles = _expand_melds(player)
     for t in KOKUSHI_TILES:
-        is_agari, _, _ = evaluate_hand(player['hand'] + [t], meld_kans=meld_tiles, kan_count=kan_count)
+        is_agari, _, _ = evaluate_hand(
+            player['hand'] + [t],
+            meld_kans=meld_tiles,
+            kan_count=kan_count,
+            ankan_tiles=ankan_tiles,
+            open_meld_tiles=open_meld_tiles
+        )
         if is_agari:
             return True
     return False
@@ -260,10 +273,17 @@ def _perform_discard(room, room_id, player, tile_to_remove):
     player['hand'].remove(tile_to_remove)
     player['kawa'].append(tile_to_remove)
     player['drawn_tile'] = None
+    player['rinshan_chance'] = False  # 嶺上牌をツモった直後のチャンスは、打牌したら消える
+    room['first_decision_pending'] = False  # 誰かが1回でも打牌したら天和のチャンスは消える
+
     if player.get('pending_riichi_discard'):
         # リーチ宣言後、最初の打牌＝リーチ宣言牌として河の中の位置を記録する（横向き表示用）
         player['riichi_tile_index'] = len(player['kawa']) - 1
         player['pending_riichi_discard'] = False
+    elif player.get('riichi'):
+        # リーチ宣言牌以降の打牌＝次巡に入った、ということなので一発は消える
+        player['ippatsu_active'] = False
+
     room['last_discard'] = tile_to_remove
     room['last_discard_player'] = player['id']
     room['ron_claims'] = []
@@ -376,16 +396,25 @@ def _remove_last_kawa_tile(player, tile):
             return
 
 def _expand_melds(player):
-    """副露を実枚数分（ポン=3枚, カン/暗槓=4枚）展開し、役判定用のカン数も併せて返す"""
+    """副露を実枚数分（ポン=3枚, カン/暗槓=4枚）展開し、役判定に必要な内訳を返す。
+    戻り値: (全副露牌のフラットリスト, カン数, 暗槓牌のフラットリスト, ポン/明槓牌のフラットリスト)"""
     meld_tiles = []
     kan_count = 0
+    ankan_tiles = []
+    open_meld_tiles = []
     for m in player['melds']:
-        if m['type'] in ('kan', 'ankan'):
+        if m['type'] == 'ankan':
             meld_tiles.extend([m['tile']] * 4)
             kan_count += 1
-        else:
+            ankan_tiles.extend([m['tile']] * 4)
+        elif m['type'] == 'kan':
+            meld_tiles.extend([m['tile']] * 4)
+            kan_count += 1
+            open_meld_tiles.extend([m['tile']] * 4)
+        else:  # pon
             meld_tiles.extend([m['tile']] * 3)
-    return meld_tiles, kan_count
+            open_meld_tiles.extend([m['tile']] * 3)
+    return meld_tiles, kan_count, ankan_tiles, open_meld_tiles
 
 @socketio.on('create_room')
 def handle_create_room(data):
@@ -590,13 +619,25 @@ def handle_action_ron(data):
         return  # 二重宣言は無視
 
     winning_tile = room['last_discard']
-    meld_tiles, kan_count = _expand_melds(clicker)
+    meld_tiles, kan_count, ankan_tiles, open_meld_tiles = _expand_melds(clicker)
+    is_houtei = len(room['deck']) == 0
+    is_renhou = (not room.get('any_call_happened')) and len(clicker['kawa']) == 0
     is_agari, yaku, score = evaluate_hand(
         clicker['hand'] + [winning_tile],
         meld_kans=meld_tiles,
         kan_count=kan_count,
+        ankan_tiles=ankan_tiles,
+        open_meld_tiles=open_meld_tiles,
         dora_indicators=room['dora_indicators'],
-        riichi=clicker.get('riichi', False)
+        riichi=clicker.get('riichi', False),
+        double_riichi=clicker.get('double_riichi', False),
+        ippatsu=clicker.get('ippatsu_active', False),
+        is_tsumo=False,
+        is_houtei=is_houtei,
+        is_renhou=is_renhou,
+        seat_wind=WIND_TO_TILE.get(clicker.get('wind')),
+        round_wind=ROUND_WIND_TILE,
+        winning_tile=winning_tile
     )
 
     if is_agari:
@@ -620,13 +661,29 @@ def handle_action_tsumo(data):
     if current_player['id'] != request.sid:
         return
 
-    meld_tiles, kan_count = _expand_melds(current_player)
+    meld_tiles, kan_count, ankan_tiles, open_meld_tiles = _expand_melds(current_player)
+    is_dealer = (room['current_turn'] == room.get('dealer_idx', 0))
+    is_haitei = len(room['deck']) == 0
+    is_tenhou = is_dealer and room.get('first_decision_pending', False) and not room.get('any_call_happened')
+    is_chiihou = (not is_dealer) and len(current_player['kawa']) == 0 and not room.get('any_call_happened')
     is_agari, yaku, score = evaluate_hand(
         current_player['hand'],
         meld_kans=meld_tiles,
         kan_count=kan_count,
+        ankan_tiles=ankan_tiles,
+        open_meld_tiles=open_meld_tiles,
         dora_indicators=room['dora_indicators'],
-        riichi=current_player.get('riichi', False)
+        riichi=current_player.get('riichi', False),
+        double_riichi=current_player.get('double_riichi', False),
+        ippatsu=current_player.get('ippatsu_active', False),
+        is_tsumo=True,
+        is_rinshan=current_player.get('rinshan_chance', False),
+        is_haitei=is_haitei,
+        is_tenhou=is_tenhou,
+        is_chiihou=is_chiihou,
+        seat_wind=WIND_TO_TILE.get(current_player.get('wind')),
+        round_wind=ROUND_WIND_TILE,
+        winning_tile=current_player.get('drawn_tile')
     )
 
     if is_agari:
@@ -687,7 +744,10 @@ def handle_action_pon(data):
 
         room['current_turn'] = room['players'].index(clicker)
         room['last_discard'] = None
-        
+        room['any_call_happened'] = True
+        for p in room['players']:
+            p['ippatsu_active'] = False  # 他家の鳴きが入ったので、全員の一発が消える
+
         emit('system_msg', {'message': f"📣 ポン！ {clicker['name']} さんが{loser['name'] if loser else ''}から鳴きました"}, room=room_id)
     else:
         # 誤ポン（そもそも鳴ける牌が無いのに宣言した）：チョンボとして罰符を適用する
@@ -726,11 +786,18 @@ def handle_action_kan(data):
             clicker['melds'].append({'tile': target_tile, 'type': 'kan', 'from': direction})
 
             room['current_turn'] = room['players'].index(clicker)
+            room['any_call_happened'] = True
+            for p in room['players']:
+                p['ippatsu_active'] = False  # 他家の鳴きが入ったので、全員の一発が消える
             if room['deck']:
                 drawn = room['deck'].pop()
                 clicker['hand'].append(drawn)
                 clicker['hand'].sort()
                 clicker['drawn_tile'] = drawn
+                clicker['rinshan_chance'] = True  # 嶺上牌をツモった直後（嶺上開花のチャンス）
+            if room['deck']:
+                # カンドラ：新しいドラ表示牌をめくる
+                room['dora_indicators'].append(room['deck'].pop())
             room['last_discard'] = None
             emit('system_msg', {'message': f"🔔 カン！ {clicker['name']} さんが{loser['name'] if loser else ''}から明槓しました"}, room=room_id)
             broadcast_state(room_id)
@@ -758,6 +825,10 @@ def handle_action_kan(data):
                 clicker['hand'].append(drawn)
                 clicker['hand'].sort()
                 clicker['drawn_tile'] = drawn
+                clicker['rinshan_chance'] = True  # 嶺上牌をツモった直後（嶺上開花のチャンス）
+            if room['deck']:
+                # カンドラ：新しいドラ表示牌をめくる
+                room['dora_indicators'].append(room['deck'].pop())
             emit('system_msg', {'message': f"🔔 カン！ {clicker['name']} さんが暗槓しました"}, room=room_id)
             broadcast_state(room_id)
         else:
@@ -787,6 +858,9 @@ def handle_action_riichi(data):
 
     clicker['riichi'] = True
     clicker['pending_riichi_discard'] = True
+    clicker['ippatsu_active'] = True
+    # ダブルリーチ：自分がまだ一度も打牌しておらず(=最初の手番)、かつ誰の鳴きも発生していなければ成立
+    clicker['double_riichi'] = (len(clicker['kawa']) == 0 and not room.get('any_call_happened'))
     emit('system_msg', {'message': f"❗ {clicker['name']} さんがリーチを宣言しました！"}, room=room_id)
     broadcast_state(room_id)
 
