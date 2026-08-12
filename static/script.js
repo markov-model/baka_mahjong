@@ -339,7 +339,7 @@ function injectMahjongStyles() {
         .tile-my-hand:hover { transform: translateY(-4px); background: #ffffff; }
         .tile-dora    { width: 24px; height: 34px; font-size: 11px; margin: 0 1px; }
         .tile-kawa    { width: 19px; height: 27px; font-size: 9px; margin: 0.5px; }
-        .tile-meld    { width: 22px; height: 31px; font-size: 10px; background: #e8f4f8; border-color: #00b894; margin: 1px; }
+        .tile-meld    { width: 22px; height: 31px; font-size: 10px; background: #e8f4f8; color: #111; border-color: #00b894; margin: 1px; }
         .tile-hidden  { width: 18px; height: 28px; background: linear-gradient(135deg, #1b4332, #081c15); border: 1px solid #40916c; color: #52b788; font-size: 9px; }
 
         .tile-v-hidden {
@@ -958,8 +958,8 @@ function renderMeldGroup(meld, isVertical) {
     const borderColor = isAnkan ? '#636e72' : '#00b894';
 
     return `
-        <div style="position:relative; display:inline-flex; ${isVertical ? 'flex-direction:column;' : 'flex-direction:row;'} align-items:center; gap:1px; border:1px solid ${borderColor}; border-radius:5px; padding:3px 4px; margin:2px;">
-            ${badgeText ? `<span style="position:absolute; top:-9px; left:2px; font-size:7px; line-height:1; background:#0b1d13; color:#ffd700; padding:1px 3px; border-radius:3px; border:1px solid ${borderColor}; white-space:nowrap;">${escapeHtml(badgeText)}</span>` : ''}
+        <div style="position:relative; z-index:1; display:inline-flex; ${isVertical ? 'flex-direction:column;' : 'flex-direction:row;'} align-items:center; gap:1px; border:1px solid ${borderColor}; border-radius:5px; padding:3px 4px; margin:2px;">
+            ${badgeText ? `<span style="position:absolute; z-index:2; top:-9px; left:2px; font-size:7px; line-height:1; background:#0b1d13; color:#ffd700; padding:1px 3px; border-radius:3px; border:1px solid ${borderColor}; white-space:nowrap;">${escapeHtml(badgeText)}</span>` : ''}
             ${tilesHtml}
         </div>
     `;
