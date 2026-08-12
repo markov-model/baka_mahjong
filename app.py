@@ -9,7 +9,7 @@ except ImportError:
     pass
 
 from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit, join_room
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import time
 import random
 import os
@@ -278,7 +278,9 @@ def _finalize_ron_claims(room, room_id):
         winners_payload.append({
             'winner': winner['name'],
             'yaku': claim['yaku'],
-            'score_str': format_big_number(claim['score'])
+            'score_str': format_big_number(claim['score']),
+            'hand': list(winner['hand']),
+            'melds': [dict(m) for m in winner['melds']]
         })
 
     room['winning_tile'] = winning_tile if winners_payload else None
@@ -316,7 +318,9 @@ def _finalize_ron_claims(room, room_id):
             'yaku': claims[0]['yaku'],
             'score_str': w['score_str'],
             'type': 'ロン',
-            'winning_tile': winning_tile
+            'winning_tile': winning_tile,
+            'hand': w['hand'],
+            'melds': w['melds']
         }, room=room_id)
         socketio.emit('system_msg', {'message': f"🀄 ロン！ {w['winner']} さんが {loser_name} さんからアガリました！（{w['score_str']}点）"}, room=room_id)
 
@@ -622,6 +626,45 @@ def handle_disconnect():
             _auto_discard_if_disconnected(room, room_id)
         break
 
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    """プレイヤー自身の意思による部屋退出（ロビー・対局中・対局終了後いずれからも呼べる）。
+    対局中の退出は座席インデックス依存の進行ロジックを壊さないよう、切断時と同じ扱い
+    （disconnectedフラグを立てて自動打牌に切り替える）にする。ロビー（waiting）中のみ
+    実際に players から除名する。"""
+    room_id = data.get('room_id')
+    room = rooms.get(room_id)
+    if not room:
+        return
+    player = next((p for p in room['players'] if p['id'] == request.sid), None)
+    if not player:
+        return
+
+    leave_room(room_id)  # Socket.IOのルームから抜け、以後このルーム宛のブロードキャストを受け取らないようにする
+    emit('room_left', {})
+
+    if room['status'] == 'waiting':
+        room['players'].remove(player)
+        if not room['players']:
+            del rooms[room_id]
+        else:
+            if player['is_host'] and not any(p['is_host'] for p in room['players']):
+                room['players'][0]['is_host'] = True
+            send_room_update(room_id)
+        return
+
+    player['disconnected'] = True
+    if player['is_host']:
+        successor = next((p for p in room['players'] if not p.get('disconnected')), None)
+        if successor:
+            player['is_host'] = False
+            successor['is_host'] = True
+            socketio.emit('system_msg', {'message': f"👑 ホストが退出したため、{successor['name']} さんがホストを引き継ぎました"}, room=room_id)
+
+    socketio.emit('system_msg', {'message': f"🚪 {player['name']} さんが退出しました（自動打牌に切り替わります）"}, room=room_id)
+    broadcast_state(room_id)
+    _auto_discard_if_disconnected(room, room_id)
+
 @socketio.on('start_game')
 def handle_start_game(data):
     room_id = data.get('room_id')
@@ -808,7 +851,9 @@ def handle_action_tsumo(data):
             'loser': '全員 (ツモ)',
             'yaku': yaku,
             'score_str': format_big_number(score),
-            'type': 'ツモ'
+            'type': 'ツモ',
+            'hand': list(current_player['hand']),
+            'melds': [dict(m) for m in current_player['melds']]
         }, room=room_id)
         
         emit('system_msg', {'message': f"🀄 ツモ！ {current_player['name']} さんのツモアガリです！（{format_big_number(score)}点）"}, room=room_id)
@@ -877,7 +922,9 @@ def handle_action_kan(data):
         if room.get('ron_claims'):
             emit('system_msg', {'message': "❌ ロンが宣言されているため鳴けません"}, to=request.sid)
             return
-        if clicker['hand'].count(target_tile) == 3:
+        if clicker['hand'].count(target_tile) >= 3:
+            # 手牌に4枚以上同じ牌があっても（例：既に3枚持っていて更に同じ牌が捨てられた場合など）
+            # 3枚だけ使ってカンを成立させ、残りは手牌に残す
             room['status'] = 'playing'
             for _ in range(3):
                 clicker['hand'].remove(target_tile)
@@ -968,7 +1015,8 @@ def handle_action_kan(data):
 @socketio.on('action_riichi')
 def handle_action_riichi(data):
     """リーチ宣言。ボタンは常に押せる（聴牌チェックはしない）。
-    副露が既にある場合は締め切り（リーチは面前手のみ）のため即チョンボ。
+    ポン・明槓など「他家から鳴いた」副露が既にある場合は締め切り（リーチは面前手のみ）のため即チョンボ。
+    暗槓は面前扱いなので、暗槓のみの副露であればリーチ可能。
     妥当性（聴牌していたか）はロン/ツモ時の誤和了判定や、流局時の手牌公開で事後的にチョンボとして精算される。"""
     room_id = data.get('room_id')
     room = rooms.get(room_id)
@@ -979,9 +1027,9 @@ def handle_action_riichi(data):
     if not clicker or clicker.get('riichi'):
         return
 
-    if clicker['melds']:
-        # 副露があるのにリーチ：即チョンボ
-        apply_chombo(room, room_id, clicker, reason="副露（ポン・カン）した手でリーチを宣言した")
+    if any(m['type'] != 'ankan' for m in clicker['melds']):
+        # 暗槓以外の副露（ポン・明槓・加槓）があるのにリーチ：即チョンボ
+        apply_chombo(room, room_id, clicker, reason="副露（ポン・明槓）した手でリーチを宣言した")
         broadcast_state(room_id)
         return
 
@@ -1107,6 +1155,7 @@ def broadcast_state(room_id):
             'winning_tile': room.get('winning_tile'),
             'is_my_turn': is_my_turn,
             'is_waiting_action': room['status'] == 'waiting_action',
+            'my_name': target_player['name'],
             'my_hand': target_player['hand'],
             'my_kawa': target_player['kawa'],
             'my_melds': target_player['melds'],

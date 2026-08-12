@@ -679,6 +679,29 @@ function reportBug() {
     socket.emit('action_bug_report', { room_id: currentRoomId });
 }
 
+function leaveRoom() {
+    if (!currentRoomId) return;
+    if (!confirm('部屋を退出しますか？')) return;
+    playSe('click');
+    socket.emit('leave_room', { room_id: currentRoomId });
+}
+
+socket.on('room_left', () => {
+    clearSession();
+    currentRoomId = null;
+    isHost = false;
+    const screenEntry = getElementByCandidates(['screen-entry', 'entry-screen']);
+    const screenWaiting = getElementByCandidates(['screen-waiting', 'waiting-screen']);
+    const screenGame = getElementByCandidates(['screen-game', 'game-screen']);
+    if (screenGame) screenGame.style.display = 'none';
+    if (screenWaiting) screenWaiting.style.display = 'none';
+    if (screenEntry) screenEntry.style.display = 'block';
+    const mrm = document.getElementById('match-result-modal');
+    if (mrm) mrm.style.display = 'none';
+    const wm = document.getElementById('win-modal');
+    if (wm) wm.style.display = 'none';
+});
+
 socket.on('room_joined', (data) => {
     currentRoomId = data.room_id;
     isHost = data.is_host;
@@ -914,7 +937,7 @@ socket.on('state_update', (state) => {
             <div class="seat-bottom">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                     <div style="font-size:15px; font-weight:bold; color:#ffd700;">
-                        👤 あなた ${state.my_is_dealer ? '<span style="background:#ff7675;color:#111;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">親</span>' : ''} ${state.my_riichi ? '<span style="background:#d63031;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">❗リーチ</span>' : ''} ${state.my_furiten ? '<span style="background:#636e72;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">🚫フリテン</span>' : ''} (持ち点: <span style="color:#00ffcc;">${state.my_score_str || state.my_score || 0}</span> 点)
+                        👤 ${escapeHtml(state.my_name || 'あなた')} ${state.my_is_dealer ? '<span style="background:#ff7675;color:#111;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">親</span>' : ''} ${state.my_riichi ? '<span style="background:#d63031;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">❗リーチ</span>' : ''} ${state.my_furiten ? '<span style="background:#636e72;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">🚫フリテン</span>' : ''} (持ち点: <span style="color:#00ffcc;">${state.my_score_str || state.my_score || 0}</span> 点)
                     </div>
                     <div id="my-kans-box" style="display:flex; align-items:center; gap:4px;">
                         <span style="font-size:11px; color:#00b894; font-weight:bold;">副露(ポン/カン):</span>
@@ -929,6 +952,7 @@ socket.on('state_update', (state) => {
                 <div id="action-buttons-container" style="display:flex; justify-content:center; flex-wrap:wrap; gap:6px;">
                     ${isMatchOver ? `
                         <div style="color:#aaa; font-size:13px;">🏁 対局終了 - 結果画面をご確認ください</div>
+                        <button onclick="leaveRoom()" style="background:#636e72; color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚪 退出</button>
                     ` : isGameOver ? `
                         <button onclick="playSe('click'); socket.emit('reset_game', {room_id: currentRoomId})" style="background:#00b894; color:#fff; border:none; padding:10px 22px; border-radius:6px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 0 12px rgba(0,184,148,0.6);">🔄 次の局へ</button>
                     ` : `
@@ -942,6 +966,7 @@ socket.on('state_update', (state) => {
                         <button onclick="socket.emit('action_ron', {room_id: currentRoomId})" style="background:#d63031; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ロン！${state.my_furiten ? '(フリテン注意)' : ''}</button>
                         <button onclick="playSe('chombo'); socket.emit('action_chombo', {room_id: currentRoomId})" style="background:#2d3436; color:#aaa; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚨 チョンボ</button>
                     `}
+                    ${!isMatchOver ? `<button onclick="leaveRoom()" style="background:#636e72; color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚪 退出</button>` : ''}
                     <button onclick="reportBug()" style="background:#6c5ce7; color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🐛 バグ報告</button>
                 </div>
             </div>
@@ -1152,6 +1177,12 @@ socket.on('win_result', (data) => {
             ? `<div><strong>和了牌:</strong> <span style="color:${getTileColor(data.winning_tile)};">${escapeHtml(formatTile(data.winning_tile))}</span></div>`
             : '';
 
+        const handTilesHtml = (hand, melds) => {
+            const handHtml = (hand || []).map(t => `<div class="tile-card tile-kawa" style="color:${getTileColor(t)};">${formatTile(t)}</div>`).join('');
+            const meldsHtml = (melds || []).map(m => `<div class="tile-card tile-kawa" style="color:${getTileColor(m.tile)}; border-color:#00b894;">${formatTile(m.tile)}</div>`).join('');
+            return `<div style="display:flex; flex-wrap:wrap; gap:2px; margin-top:4px;">${handHtml}${meldsHtml}</div>`;
+        };
+
         if (isMulti) {
             const winnerBlocks = data.winners.map(w => {
                 const yakuList = (w.yaku || []).join('<br>・');
@@ -1159,6 +1190,7 @@ socket.on('win_result', (data) => {
                     <div style="margin-top:10px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.15);">
                         <div><strong>勝者:</strong> ${escapeHtml(w.winner)} <span style="color:#00ffcc; font-weight:bold;">(+${escapeHtml(w.score_str)}点)</span></div>
                         <div style="margin-top:4px;"><strong>成立役:</strong><br>・${yakuList}</div>
+                        ${handTilesHtml(w.hand, w.melds)}
                     </div>
                 `;
             }).join('');
@@ -1174,6 +1206,7 @@ socket.on('win_result', (data) => {
                 <div><strong>和了方:</strong> ${escapeHtml(data.type)} (放銃者: ${escapeHtml(data.loser)})</div>
                 ${winningTileHtml}
                 <div style="margin-top: 8px;"><strong>成立役:</strong><br>・${yakuList}</div>
+                ${handTilesHtml(data.hand, data.melds)}
             `;
         }
     }
