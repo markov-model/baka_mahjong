@@ -62,14 +62,15 @@ def apply_chombo(room, room_id, offender, reason=""):
     }
     reason_text = f"（{reason}）" if reason else ""
     socketio.emit('system_msg', {'message': f"🚨 チョンボ！ {offender['name']} さんの錯和です{reason_text}（-{format_big_number(CHOMBO_PENALTY)}点）"}, room=room_id)
-    # トースト通知だけだと見落としやすいため、理由と手牌を添えた専用ポップアップも表示する
+    # 詳細ポップアップ（手牌を含む）は本人にのみ表示する。チョンボはあくまで誤操作であり、
+    # 和了とは違って手牌を他家に公開する理由がないため、他のプレイヤーには見せない。
     socketio.emit('chombo_result', {
         'offender': offender['name'],
         'reason': reason or '不明な理由',
         'penalty': format_big_number(CHOMBO_PENALTY),
         'hand': list(offender['hand']),
         'melds': [dict(m) for m in offender['melds']],
-    }, room=room_id)
+    }, to=offender['id'])
 
 def _assign_winds(room):
     """dealer_idx を起点に、席順(players配列の並び)から風(東南西北)を割り当てる"""
