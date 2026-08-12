@@ -673,6 +673,12 @@ function startGame() {
     socket.emit('start_game', { room_id: currentRoomId });
 }
 
+function reportBug() {
+    if (!currentRoomId) return;
+    playSe('click');
+    socket.emit('action_bug_report', { room_id: currentRoomId });
+}
+
 socket.on('room_joined', (data) => {
     currentRoomId = data.room_id;
     isHost = data.is_host;
@@ -827,6 +833,7 @@ socket.on('state_update', (state) => {
     const handNumber = state.hand_number || 1;
     const maxHands = state.max_hands || 1;
     const honba = state.honba || 0;
+    const riichiSticks = state.riichi_sticks || 0;
 
     // 対局終了モーダルは新しい局・新しい対局が始まったら自動で閉じる
     if (state.status === 'playing') {
@@ -858,7 +865,7 @@ socket.on('state_update', (state) => {
             <div class="seat-center">
                 <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.5); padding:6px 12px; border-radius:8px; border:1px solid rgba(255,215,0,0.2); margin-bottom:8px;">
                     <div style="font-size:12px; color:#ccc;">部屋: <strong style="color:#ffd700;">${state.room_id || ''}</strong></div>
-                    <div style="font-size:13px; font-weight:bold; color:#ff7675;">東${handNumber}局${honba > 0 ? `<span style="color:#ffd700;"> ${honba}本場</span>` : ''} <span style="font-size:10px; color:#aaa; font-weight:normal;">(全${maxHands}局)</span></div>
+                    <div style="font-size:13px; font-weight:bold; color:#ff7675;">東${handNumber}局${honba > 0 ? `<span style="color:#ffd700;"> ${honba}本場</span>` : ''} <span style="font-size:10px; color:#aaa; font-weight:normal;">(全${maxHands}局)</span>${riichiSticks > 0 ? `<span style="color:#ffd700; font-size:11px; margin-left:6px;">供託${riichiSticks}本</span>` : ''}</div>
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:12px; font-weight:bold; color:#ffd700;">🀄 ドラ:</span>
                         <div style="display:flex; flex-wrap:wrap; gap:2px;">${doraHtml}</div>
@@ -926,7 +933,7 @@ socket.on('state_update', (state) => {
                         <button onclick="playSe('click'); socket.emit('reset_game', {room_id: currentRoomId})" style="background:#00b894; color:#fff; border:none; padding:10px 22px; border-radius:6px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 0 12px rgba(0,184,148,0.6);">🔄 次の局へ</button>
                     ` : `
                         <button onclick="playSe('riichi'); socket.emit('action_riichi', {room_id: currentRoomId})" ${state.my_riichi ? 'disabled' : ''} style="background:${state.my_riichi ? '#555' : '#d63031'}; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:${state.my_riichi ? 'default' : 'pointer'}; opacity:${state.my_riichi ? '0.6' : '1'};">❗ ${state.my_riichi ? 'リーチ中' : 'リーチ'}</button>
-                        ${(state.my_riichi && (state.my_riichi_tile_index === null || state.my_riichi_tile_index === undefined)) ? `
+                        ${(state.my_riichi && !state.my_riichi_committed) ? `
                             <button onclick="playSe('click'); socket.emit('action_cancel_riichi', {room_id: currentRoomId})" style="background:#636e72; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">↩️ リーチ取消</button>
                         ` : ''}
                         <button onclick="playSe('pon'); socket.emit('action_pon', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">📣 ポン</button>
@@ -935,6 +942,7 @@ socket.on('state_update', (state) => {
                         <button onclick="socket.emit('action_ron', {room_id: currentRoomId})" style="background:#d63031; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ロン！${state.my_furiten ? '(フリテン注意)' : ''}</button>
                         <button onclick="playSe('chombo'); socket.emit('action_chombo', {room_id: currentRoomId})" style="background:#2d3436; color:#aaa; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚨 チョンボ</button>
                     `}
+                    <button onclick="reportBug()" style="background:#6c5ce7; color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🐛 バグ報告</button>
                 </div>
             </div>
 

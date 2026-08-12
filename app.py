@@ -33,6 +33,10 @@ INITIAL_SCORE = 100000      # 初期持ち点: 10万点
 CHOMBO_PENALTY = 32000      # チョンボ罰符: 役満と同スケール
 NAGASHI_MANGAN_SCORE = 8000  # 流しマンガンは満貫相当
 NOTEN_PENALTY_TOTAL = 3000   # 流局時のテンパイ料（聴牌者で総取り、ノーテン者で均等負担）
+RIICHI_STICK_COST = 10000   # リーチ棒: リーチ宣言時に場に供託する点数
+
+# バグ報告ログ（メモリ上に保持。サーバー再起動で消える簡易版）
+bug_reports = []
 
 def create_initial_deck(num_players=4):
     # 52枚×人数分（1種類あたり 4×人数枚）。4人なら従来通り 13種 x 16枚 = 208枚
@@ -41,15 +45,21 @@ def create_initial_deck(num_players=4):
     random.shuffle(deck)
     return deck
 
-def apply_chombo(room, room_id, offender):
+def apply_chombo(room, room_id, offender, reason=""):
     """チョンボ罰符処理。offenderから罰符を引き、他家へ均等に分配する。
-    socketio.emit を使うため、リクエストコンテキスト外（バックグラウンドスレッド）からも呼び出せる。"""
+    socketio.emit を使うため、リクエストコンテキスト外（バックグラウンドスレッド）からも呼び出せる。
+    reason はバグ報告機能用に、直近のチョンボ理由として offender に記録する。"""
     other_players = [p for p in room['players'] if p['id'] != offender['id']]
     offender['score'] -= CHOMBO_PENALTY
     if other_players:
         share = CHOMBO_PENALTY // len(other_players)
         for p in other_players:
             p['score'] += share
+    offender['last_chombo_info'] = {
+        'reason': reason,
+        'hand': list(offender['hand']),
+        'melds': [dict(m) for m in offender['melds']],
+    }
     socketio.emit('system_msg', {'message': f"🚨 チョンボ！ {offender['name']} さんの錯和です（-{format_big_number(CHOMBO_PENALTY)}点）"}, room=room_id)
 
 def _assign_winds(room):
@@ -81,7 +91,8 @@ def _deal_new_hand(room):
         p['riichi'] = False
         p['drawn_tile'] = None          # 直近でツモった牌（河・手牌表示のツモ切り判定用）
         p['pending_riichi_discard'] = False  # リーチ宣言直後の次の打牌かどうか
-        p['riichi_tile_index'] = None   # 河の中でリーチ宣言牌にあたるインデックス（横向き表示用）
+        p['riichi_tile_index'] = None   # 河の中でリーチ宣言牌にあたるインデックス（横向き表示用のみ。鳴かれるとNoneに戻ることがある）
+        p['riichi_committed'] = False   # リーチ宣言牌を実際に打牌済みか（鳴かれてもリセットされない、取消可否・ツモ切り固定の判定用）
         p['rinshan_chance'] = False     # 槓の直後の嶺上牌をツモった直後かどうか（嶺上開花判定用）
         p['ippatsu_active'] = False     # リーチ後、一発が生きているか
         p['double_riichi'] = False      # ダブルリーチが成立しているか
@@ -171,7 +182,7 @@ def _reveal_riichi_hands(room, room_id):
         is_tenpai = _check_tenpai(p)
         revealed.append({'name': p['name'], 'hand': list(p['hand']), 'is_tenpai': is_tenpai})
         if not is_tenpai:
-            apply_chombo(room, room_id, p)
+            apply_chombo(room, room_id, p, reason="リーチ宣言していたが流局時にノーテンだった（不正リーチ）")
     return revealed
 
 def _handle_exhaustive_draw(room, room_id):
@@ -272,6 +283,18 @@ def _finalize_ron_claims(room, room_id):
 
     room['winning_tile'] = winning_tile if winners_payload else None
 
+    if winners_payload:
+        # 供託されているリーチ棒を和了者へ渡す（ダブロン・トリプルロンの場合は均等分配）
+        sticks = room.get('riichi_sticks', 0)
+        if sticks > 0:
+            stick_total = sticks * RIICHI_STICK_COST
+            winners = [p for p in room['players'] if p['id'] in {c['id'] for c in claims}]
+            if winners:
+                share = stick_total // len(winners)
+                for w in winners:
+                    w['score'] += share
+                room['riichi_sticks'] = 0
+
     dealer_id = room['players'][room.get('dealer_idx', 0)]['id']
     room['renchan'] = any(claim['id'] == dealer_id for claim in claims)
 
@@ -314,6 +337,11 @@ def _perform_discard(room, room_id, player, tile_to_remove):
         # リーチ宣言後、最初の打牌＝リーチ宣言牌として河の中の位置を記録する（横向き表示用）
         player['riichi_tile_index'] = len(player['kawa']) - 1
         player['pending_riichi_discard'] = False
+        # riichi_committed は宣言牌を鳴かれても絶対にリセットしない（取消可否・ツモ切り固定判定の正本）
+        player['riichi_committed'] = True
+        # リーチ棒を場に供託する（宣言牌を実際に切った時点で確定。取消時はここに到達しないので供託されない）
+        player['score'] -= RIICHI_STICK_COST
+        room['riichi_sticks'] = room.get('riichi_sticks', 0) + 1
     elif player.get('riichi'):
         # リーチ宣言牌以降の打牌＝次巡に入った、ということなので一発は消える
         player['ippatsu_active'] = False
@@ -611,6 +639,7 @@ def handle_start_game(data):
     room['max_hands'] = len(room['players'])
     room['honba'] = 0
     room['renchan'] = False
+    room['riichi_sticks'] = 0  # リーチ棒の供託本数（対局開始時のみリセット。局をまたいで繰り越す）
     _assign_winds(room)
     _deal_new_hand(room)
 
@@ -652,7 +681,7 @@ def handle_discard_tile(data):
     # どの牌を切るか自由に選べる（riichi_tile_index が None＝まだ宣言牌を切っていない状態）
     is_riichi_locked = (
         current_player.get('riichi')
-        and current_player.get('riichi_tile_index') is not None
+        and current_player.get('riichi_committed')
         and drawn_tile is not None
     )
     if is_riichi_locked and tile_to_remove != drawn_tile:
@@ -678,7 +707,7 @@ def handle_action_ron(data):
 
     if _is_furiten(clicker):
         # フリテン中のロン宣言はチョンボとして罰符を適用する
-        apply_chombo(room, room_id, clicker)
+        apply_chombo(room, room_id, clicker, reason="フリテン中にロンを宣言した")
         broadcast_state(room_id)
         return
 
@@ -710,7 +739,7 @@ def handle_action_ron(data):
         broadcast_state(room_id)
     else:
         # 誤ロン（チョンボ）：局は終了させず、罰符のみ適用して続行する
-        apply_chombo(room, room_id, clicker)
+        apply_chombo(room, room_id, clicker, reason="ロンを宣言したが手牌がアガリ形になっていなかった（誤ロン）")
         broadcast_state(room_id)
 
 # 既存の handle_action_tsumo を以下に置き換え
@@ -723,6 +752,12 @@ def handle_action_tsumo(data):
 
     current_player = room['players'][room['current_turn']]
     if current_player['id'] != request.sid:
+        return
+
+    if current_player.get('drawn_tile') is None:
+        # ツモっていないのにツモ宣言（例：ポン直後は打牌が必要でロンでしか和了できない）：チョンボ
+        apply_chombo(room, room_id, current_player, reason="ツモっていないのにツモを宣言した（ポン直後など）")
+        broadcast_state(room_id)
         return
 
     meld_tiles, kan_count, ankan_tiles, open_meld_tiles = _expand_melds(current_player)
@@ -762,7 +797,12 @@ def handle_action_tsumo(data):
             if p['id'] != current_player['id']:
                 p['score'] -= per_player_score
         current_player['score'] += score
-        
+
+        sticks = room.get('riichi_sticks', 0)
+        if sticks > 0:
+            current_player['score'] += sticks * RIICHI_STICK_COST
+            room['riichi_sticks'] = 0
+
         emit('win_result', {
             'winner': current_player['name'],
             'loser': '全員 (ツモ)',
@@ -774,7 +814,7 @@ def handle_action_tsumo(data):
         emit('system_msg', {'message': f"🀄 ツモ！ {current_player['name']} さんのツモアガリです！（{format_big_number(score)}点）"}, room=room_id)
     else:
         # 誤ツモ（チョンボ）：局は終了させず、罰符のみ適用して続行する
-        apply_chombo(room, room_id, current_player)
+        apply_chombo(room, room_id, current_player, reason="ツモを宣言したが手牌がアガリ形になっていなかった（誤ツモ）")
 
     broadcast_state(room_id)
 
@@ -816,7 +856,7 @@ def handle_action_pon(data):
         emit('system_msg', {'message': f"📣 ポン！ {clicker['name']} さんが{loser['name'] if loser else ''}から鳴きました"}, room=room_id)
     else:
         # 誤ポン（そもそも鳴ける牌が無いのに宣言した）：チョンボとして罰符を適用する
-        apply_chombo(room, room_id, clicker)
+        apply_chombo(room, room_id, clicker, reason="ポンできる牌がないのにポンを宣言した（誤ポン）")
 
     broadcast_state(room_id)
 
@@ -869,14 +909,15 @@ def handle_action_kan(data):
             return
         else:
             # 誤カン（そもそも明槓できる牌が無いのに宣言した）：チョンボとして罰符を適用する
-            apply_chombo(room, room_id, clicker)
+            apply_chombo(room, room_id, clicker, reason="明槓できる牌がないのにカンを宣言した（誤カン）")
             broadcast_state(room_id)
             return
 
     if room['status'] == 'playing' and room['players'][room['current_turn']]['id'] == request.sid:
         kan_tile = None
         for t in set(clicker['hand']):
-            if clicker['hand'].count(t) == 4:
+            # 5枚以上同じ牌を持っている場合も暗槓できる（4枚使用し、残りは手牌に残す）
+            if clicker['hand'].count(t) >= 4:
                 kan_tile = t
                 break
 
@@ -921,7 +962,7 @@ def handle_action_kan(data):
             broadcast_state(room_id)
         else:
             # 誤カン（そもそも暗槓・加槓できる牌が無いのに宣言した）：チョンボとして罰符を適用する
-            apply_chombo(room, room_id, clicker)
+            apply_chombo(room, room_id, clicker, reason="暗槓・加槓できる牌がないのにカンを宣言した（誤カン）")
             broadcast_state(room_id)
 
 @socketio.on('action_riichi')
@@ -940,7 +981,7 @@ def handle_action_riichi(data):
 
     if clicker['melds']:
         # 副露があるのにリーチ：即チョンボ
-        apply_chombo(room, room_id, clicker)
+        apply_chombo(room, room_id, clicker, reason="副露（ポン・カン）した手でリーチを宣言した")
         broadcast_state(room_id)
         return
 
@@ -955,14 +996,16 @@ def handle_action_riichi(data):
 @socketio.on('action_cancel_riichi')
 def handle_action_cancel_riichi(data):
     """リーチ宣言の取り消し。宣言牌（リーチ後最初の打牌）をまだ切っていない間だけ可能。
-    一度でも打牌してしまうと riichi_tile_index が確定するため、それ以降は取り消せない。"""
+    riichi_committed は一度打牌すると鳴かれても絶対にリセットされないフラグなので、
+    これをもって「宣言牌を切り済みか」を判定する（riichi_tile_index は鳴かれるとNoneに
+    戻ることがあり、それだけで判定すると宣言牌が鳴かれた後にリーチを取り消せてしまうバグになる）。"""
     room_id = data.get('room_id')
     room = rooms.get(room_id)
     if not room:
         return
 
     clicker = next((p for p in room['players'] if p['id'] == request.sid), None)
-    if not clicker or not clicker.get('riichi') or clicker.get('riichi_tile_index') is not None:
+    if not clicker or not clicker.get('riichi') or clicker.get('riichi_committed'):
         return
 
     clicker['riichi'] = False
@@ -980,8 +1023,36 @@ def handle_action_chombo(data):
         return
     clicker = next((p for p in room['players'] if p['id'] == request.sid), None)
     if clicker:
-        apply_chombo(room, room_id, clicker)
+        apply_chombo(room, room_id, clicker, reason="自己申告チョンボ")
         broadcast_state(room_id)
+
+@socketio.on('action_bug_report')
+def handle_action_bug_report(data):
+    """バグ報告ボタン。押した時点のプレイヤーの手牌・副露・直近のチョンボ理由をログに記録する。"""
+    room_id = data.get('room_id')
+    room = rooms.get(room_id)
+    if not room:
+        return
+    clicker = next((p for p in room['players'] if p['id'] == request.sid), None)
+    if not clicker:
+        return
+
+    report = {
+        'time': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'room_id': room_id,
+        'hand_number': room.get('hand_number'),
+        'status': room.get('status'),
+        'player_name': clicker['name'],
+        'hand': list(clicker['hand']),
+        'kawa': list(clicker['kawa']),
+        'melds': [dict(m) for m in clicker['melds']],
+        'riichi': clicker.get('riichi', False),
+        'dora_indicators': list(room.get('dora_indicators', [])),
+        'last_chombo_info': clicker.get('last_chombo_info'),
+    }
+    bug_reports.append(report)
+    print(f"🐛 [BUG REPORT] {report}")
+    emit('system_msg', {'message': "🐛 バグ報告を受け付けました。ご協力ありがとうございます！"}, to=request.sid)
 
 def send_room_update(room_id):
     room = rooms.get(room_id)
@@ -1029,6 +1100,7 @@ def broadcast_state(room_id):
             'hand_number': room.get('hand_number', 1),
             'max_hands': room.get('max_hands', len(room['players'])),
             'honba': room.get('honba', 0),
+            'riichi_sticks': room.get('riichi_sticks', 0),
             'deck_count': len(room['deck']),
             'dora_indicators': room['dora_indicators'],
             'last_discard': room['last_discard'],
@@ -1046,6 +1118,7 @@ def broadcast_state(room_id):
             'my_is_host': target_player.get('is_host', False),
             'my_drawn_tile': target_player.get('drawn_tile'),
             'my_riichi_tile_index': target_player.get('riichi_tile_index'),
+            'my_riichi_committed': target_player.get('riichi_committed', False),
             'my_furiten': _is_furiten(target_player),
             'others': others_info
         }, to=target_player['id'])
