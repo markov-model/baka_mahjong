@@ -658,8 +658,9 @@ def handle_action_ron(data):
         return  # 二重宣言は無視
 
     if _is_furiten(clicker):
-        # フリテン中はロンできない（チョンボにはならず、単に成立しない）
-        emit('system_msg', {'message': f"❌ {clicker['name']} さんはフリテンのためロンできません"}, to=request.sid)
+        # フリテン中のロン宣言はチョンボとして罰符を適用する
+        apply_chombo(room, room_id, clicker)
+        broadcast_state(room_id)
         return
 
     winning_tile = room['last_discard']

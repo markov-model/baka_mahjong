@@ -916,7 +916,7 @@ socket.on('state_update', (state) => {
                         <button onclick="playSe('pon'); socket.emit('action_pon', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">📣 ポン</button>
                         <button onclick="playSe('kan'); socket.emit('action_kan', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🔔 カン</button>
                         <button onclick="socket.emit('action_tsumo', {room_id: currentRoomId})" style="background:#e17055; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ツモ！</button>
-                        <button onclick="socket.emit('action_ron', {room_id: currentRoomId})" ${state.my_furiten ? 'disabled' : ''} style="background:${state.my_furiten ? '#555' : '#d63031'}; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:${state.my_furiten ? 'not-allowed' : 'pointer'}; opacity:${state.my_furiten ? '0.5' : '1'};">🀄 ${state.my_furiten ? 'フリテン中' : 'ロン！'}</button>
+                        <button onclick="socket.emit('action_ron', {room_id: currentRoomId})" style="background:#d63031; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ロン！${state.my_furiten ? '(フリテン注意)' : ''}</button>
                         <button onclick="playSe('chombo'); socket.emit('action_chombo', {room_id: currentRoomId})" style="background:#2d3436; color:#aaa; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚨 チョンボ</button>
                     `}
                 </div>
