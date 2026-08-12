@@ -235,3 +235,48 @@ button:active { transform: translateY(0); }
     0% { transform: scale(0.8); opacity: 0; }
     100% { transform: scale(1); opacity: 1; }
 }
+
+/* ====================================================
+   📱 スマホを縦持ちしている場合、横向きにしてもらうよう促す
+   （麻雀卓レイアウトは横長を前提にしているため。
+   CSSのtransformで強制回転させる方式は、コンテンツが縦の折り返し分を
+   超えるとはみ出す等の不具合が起きやすいため採用せず、実際に端末を
+   回転してもらう素直な方式にしている）
+   ==================================================== */
+#rotate-device-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: #0b1d13;
+    color: #fff;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+}
+
+#rotate-device-overlay .rotate-icon {
+    font-size: 56px;
+    animation: rotateHint 1.6s ease-in-out infinite;
+    margin-bottom: 16px;
+}
+
+#rotate-device-overlay p {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--accent-yellow);
+    margin: 0;
+}
+
+@keyframes rotateHint {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(90deg); }
+}
+
+@media screen and (max-width: 926px) and (orientation: portrait) {
+    #rotate-device-overlay {
+        display: flex;
+    }
+}

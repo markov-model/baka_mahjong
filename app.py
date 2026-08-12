@@ -1,6 +1,15 @@
+# eventlet を使う場合は、他の何よりも先に monkey_patch を行う必要がある。
+# これを怠ると、time.sleep() 等の標準ライブラリ呼び出しが eventlet のイベントループ全体を
+# ブロックしてしまい、バックグラウンドタスク（ロン/鳴き待ちタイマー等）からの
+# 状態更新が他のクライアントに届かない・遅延する不具合の原因になる。
+try:
+    import eventlet
+    eventlet.monkey_patch()
+except ImportError:
+    pass
+
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room
-import threading
 import time
 import random
 import os
@@ -257,7 +266,9 @@ def _perform_discard(room, room_id, player, tile_to_remove):
     current_seq = room['discard_seq']
     broadcast_state(room_id)
 
-    threading.Thread(target=wait_and_advance, args=(room_id, current_seq), daemon=True).start()
+    # socketio.start_background_task を使う（生の threading.Thread だと、本番の
+    # eventlet 動作モードでイベントループと協調できず、更新が届かないことがある）
+    socketio.start_background_task(wait_and_advance, room_id, current_seq)
 
 def wait_and_advance(target_room_id, expected_seq):
     time.sleep(3.0)

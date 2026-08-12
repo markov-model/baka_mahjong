@@ -4,6 +4,8 @@ let isHost = false;
 let isMyTurn = false;
 let actionTimer = null;
 let myUsername = "";
+let previousGameState = null; // state_update の差分検知（打牌音・ツモ音・手番通知音）用
+let gameScreenEverShown = false; // 対局画面が初めて表示されたタイミングでBGMを切り替えるためのフラグ
 
 // ====================================================
 // 🀄 1. 牌の表示マッピング & 変換関数
@@ -57,27 +59,215 @@ function parseTilesArray(data) {
     return result;
 }
 
-// 🔊 効果音再生
-function playActionSound() {
+// ====================================================
+// 🔊 サウンドマネージャー（BGM / SE）
+// ====================================================
+// 方針：discard_self/discard_other/draw/click/turn_notify は控えめに、
+// ron/tsumo_win/yakuman/chombo は思い切り大仰に鳴らす。この静と動の落差で
+// 「数億点が飛び交うゲーム」の馬鹿さを演出する。
+// 音声ファイルは後から追加される想定なので、存在しない/読み込みに失敗しても
+// 絶対にゲーム進行を止めない（すべて try/catch と .catch(() => {}) で握りつぶす）。
+const SOUND_BASE = '/static/sounds/';
+
+const SE_FILES = {
+    click:            'se/se_click.mp3',
+    discard_self:     'se/se_discard_self.mp3',
+    discard_other:    'se/se_discard_other.mp3',
+    draw:             'se/se_draw.mp3',
+    pon:              'se/se_pon.mp3',
+    kan:              'se/se_kan.mp3',
+    riichi:           'se/se_riichi.mp3',
+    ron:              'se/se_ron.mp3',
+    tsumo_win:        'se/se_tsumo_win.mp3',
+    yakuman:          'se/se_yakuman.mp3',
+    chombo:           'se/se_chombo.mp3',
+    draw_exhaustive:  'se/se_draw_exhaustive.mp3',
+    turn_notify:      'se/se_turn_notify.mp3',
+    timer_tick:       'se/se_timer_tick.mp3'
+};
+
+const BGM_FILES = {
+    lobby:  'bgm/bgm_lobby.mp3',
+    game:   'bgm/bgm_game.mp3',
+    reach:  'bgm/bgm_reach.mp3',
+    result: 'bgm/bgm_result.mp3'
+};
+
+const soundState = {
+    muted: false,
+    bgmVolume: 0.35,
+    seVolume: 0.7
+};
+
+(function loadSoundSettings() {
     try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.12);
-    } catch(e) {}
+        const saved = JSON.parse(localStorage.getItem('mahjong_sound_settings') || '{}');
+        if (typeof saved.muted === 'boolean') soundState.muted = saved.muted;
+        if (typeof saved.bgmVolume === 'number') soundState.bgmVolume = saved.bgmVolume;
+        if (typeof saved.seVolume === 'number') soundState.seVolume = saved.seVolume;
+    } catch (e) { /* localStorageが使えない環境ではデフォルト値のまま */ }
+})();
+
+function saveSoundSettings() {
+    try {
+        localStorage.setItem('mahjong_sound_settings', JSON.stringify(soundState));
+    } catch (e) {}
+}
+
+// SEは連打されても重ねて鳴らせるよう、キャッシュしたAudioをcloneNodeして再生する
+const seAudioCache = {};
+function playSe(name) {
+    if (soundState.muted) return;
+    const path = SE_FILES[name];
+    if (!path) return; // 未知のキーでも絶対にエラーにしない
+    try {
+        let base = seAudioCache[name];
+        if (!base) {
+            base = new Audio(SOUND_BASE + path);
+            seAudioCache[name] = base;
+        }
+        const instance = base.cloneNode(true);
+        instance.volume = soundState.seVolume;
+        instance.play().catch(() => { /* ファイル未配置・自動再生ブロック等は無視 */ });
+    } catch (e) { /* Audio生成自体に失敗しても無視 */ }
+}
+
+let currentBgmName = null;
+let currentBgmAudio = null;
+
+function fadeAudioVolume(audio, from, to, duration, onDone) {
+    const steps = 12;
+    const stepTime = Math.max(20, duration / steps);
+    let i = 0;
+    const interval = setInterval(() => {
+        i++;
+        try {
+            audio.volume = Math.max(0, Math.min(1, from + (to - from) * (i / steps)));
+        } catch (e) {
+            clearInterval(interval);
+            return;
+        }
+        if (i >= steps) {
+            clearInterval(interval);
+            if (onDone) onDone();
+        }
+    }, stepTime);
+}
+
+// BGM切り替え。fallbackName を渡しておくと、指定したBGMの読み込み/再生に
+// 失敗した場合（ファイル未配置など）に自動でそちらへ切り替える。
+function playBgm(name, fallbackName) {
+    if (currentBgmName === name && currentBgmAudio && !currentBgmAudio.paused) return;
+    const path = BGM_FILES[name];
+    if (!path) {
+        if (fallbackName) playBgm(fallbackName);
+        return;
+    }
+
+    const prevAudio = currentBgmAudio;
+    if (prevAudio) {
+        fadeAudioVolume(prevAudio, prevAudio.volume || 0, 0, 500, () => {
+            try { prevAudio.pause(); } catch (e) {}
+        });
+    }
+
+    try {
+        const audio = new Audio(SOUND_BASE + path);
+        audio.loop = true;
+        audio.volume = 0;
+        audio.addEventListener('error', () => {
+            if (currentBgmAudio === audio && fallbackName) {
+                currentBgmAudio = null;
+                currentBgmName = null;
+                playBgm(fallbackName);
+            }
+        });
+
+        currentBgmAudio = audio;
+        currentBgmName = name;
+
+        if (!soundState.muted) {
+            audio.play().catch(() => { /* 自動再生ブロック等は無視。UI操作後に再度呼ばれれば再生される */ });
+        }
+        fadeAudioVolume(audio, 0, soundState.bgmVolume, 800);
+    } catch (e) {
+        currentBgmAudio = null;
+        currentBgmName = null;
+        if (fallbackName) playBgm(fallbackName);
+    }
+}
+
+function setMuted(muted) {
+    soundState.muted = muted;
+    saveSoundSettings();
+    if (currentBgmAudio) {
+        try {
+            if (muted) {
+                currentBgmAudio.pause();
+            } else {
+                currentBgmAudio.play().catch(() => {});
+            }
+        } catch (e) {}
+    }
+}
+
+function setBgmVolume(vol) {
+    soundState.bgmVolume = vol;
+    saveSoundSettings();
+    if (currentBgmAudio) {
+        try { currentBgmAudio.volume = vol; } catch (e) {}
+    }
+}
+
+function setSeVolume(vol) {
+    soundState.seVolume = vol;
+    saveSoundSettings();
+}
+
+// 既存コードとの後方互換用（汎用クリック音として動作させる）
+function playActionSound() {
+    playSe('click');
+}
+
+// ====================================================
+// 🔈 サウンド設定UI（🔊アイコン → BGM/SE音量・ミュート）
+// ====================================================
+function initSoundControlUI() {
+    if (document.getElementById('sound-control')) return;
+    const container = document.createElement('div');
+    container.id = 'sound-control';
+    container.innerHTML = `
+        <button id="sound-toggle-btn" title="音量設定">${soundState.muted ? '🔇' : '🔊'}</button>
+        <div id="sound-panel">
+            <label><input type="checkbox" id="mute-checkbox" ${soundState.muted ? 'checked' : ''}> ミュート</label>
+            <label>BGM音量<input type="range" id="bgm-volume-slider" min="0" max="1" step="0.05" value="${soundState.bgmVolume}"></label>
+            <label>SE音量<input type="range" id="se-volume-slider" min="0" max="1" step="0.05" value="${soundState.seVolume}"></label>
+        </div>
+    `;
+    document.body.appendChild(container);
+
+    const toggleBtn = document.getElementById('sound-toggle-btn');
+    const panel = document.getElementById('sound-panel');
+    toggleBtn.addEventListener('click', () => {
+        panel.classList.toggle('sound-panel-open');
+    });
+
+    document.getElementById('mute-checkbox').addEventListener('change', (e) => {
+        setMuted(e.target.checked);
+        toggleBtn.innerText = soundState.muted ? '🔇' : '🔊';
+    });
+    document.getElementById('bgm-volume-slider').addEventListener('input', (e) => {
+        setBgmVolume(parseFloat(e.target.value));
+    });
+    document.getElementById('se-volume-slider').addEventListener('input', (e) => {
+        setSeVolume(parseFloat(e.target.value));
+    });
 }
 
 // ====================================================
 // 🎨 2. 麻雀卓専用スタイルの動的注入
 // ====================================================
+
 function injectMahjongStyles() {
     if (document.getElementById('mahjong-layout-style')) return;
     const style = document.createElement('style');
@@ -217,9 +407,61 @@ function injectMahjongStyles() {
             opacity: 1;
             transform: translateY(0);
         }
+
+        #sound-control {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 10001;
+            font-family: inherit;
+        }
+
+        #sound-toggle-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            border: 1px solid rgba(0, 255, 204, 0.4);
+            background: rgba(10, 25, 18, 0.9);
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #sound-panel {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            background: rgba(10, 25, 18, 0.95);
+            border: 1px solid rgba(0, 255, 204, 0.35);
+            border-radius: 10px;
+            padding: 12px;
+            margin-top: 6px;
+            width: 170px;
+            font-size: 12px;
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+        }
+
+        #sound-panel.sound-panel-open {
+            display: flex;
+        }
+
+        #sound-panel label {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        #sound-panel input[type="range"] {
+            width: 100%;
+        }
     `;
     document.head.appendChild(style);
 }
+
+// ページ読み込み時点でスタイルと音量設定UIを用意しておく（ロビー画面から使えるように）
+injectMahjongStyles();
+initSoundControlUI();
 
 // ====================================================
 // 🔔 2.5 システムメッセージのトースト表示
@@ -259,12 +501,19 @@ function startVisualTimer(seconds) {
     bar.style.width = '100%';
     const intervalTime = 100;
     const totalSteps = (seconds * 1000) / intervalTime;
+    const tickAtStep = totalSteps - (1000 / intervalTime); // 残り1秒の時点
     let currentStep = 0;
+    let tickPlayed = false;
 
     actionTimer = setInterval(() => {
         currentStep++;
         let percentage = 100 - (currentStep / totalSteps) * 100;
         bar.style.width = Math.max(0, percentage) + '%';
+
+        if (!tickPlayed && currentStep >= tickAtStep) {
+            tickPlayed = true;
+            playSe('timer_tick');
+        }
 
         if (currentStep >= totalSteps) {
             clearInterval(actionTimer);
@@ -319,7 +568,7 @@ window.handleTileClick = function(elem) {
     }
 
     if (isMyTurn) {
-        playActionSound();
+        playSe('discard_self');
         if (actionTimer) clearInterval(actionTimer);
         socket.emit('discard_tile', { room_id: currentRoomId, tile: tileVal });
     } else {
@@ -373,8 +622,19 @@ socket.on('connect', () => {
 // ====================================================
 // 🎮 5. エントリー操作 & Socket.IO
 // ====================================================
+// ブラウザの自動再生ポリシー上、ページ読み込み直後はBGMを再生できないため、
+// 最初のユーザー操作（部屋作成/参加ボタンのクリック）を検知した時に一度だけロビーBGMを鳴らす
+let lobbyBgmUnlocked = false;
+function unlockLobbyBgm() {
+    if (lobbyBgmUnlocked) return;
+    lobbyBgmUnlocked = true;
+    playBgm('lobby');
+}
+
 function createRoom() {
     clearError();
+    unlockLobbyBgm();
+    playSe('click');
     const username = getInputValue(['username', 'user-name', 'player-name', 'name']);
     myUsername = username;
     clearSession(); // 新規に部屋を立てる＝古い再接続情報は破棄する
@@ -383,6 +643,8 @@ function createRoom() {
 
 function joinRoom() {
     clearError();
+    unlockLobbyBgm();
+    playSe('click');
     const username = getInputValue(['username', 'user-name', 'player-name', 'name']);
     const code = getInputValue(['join-code', 'room-code', 'room-id', 'join_code', 'room_code', 'roomCode']).toUpperCase();
     if (!code) {
@@ -397,6 +659,7 @@ const joinGame = joinRoom;
 
 function startGame() {
     if (!currentRoomId) return;
+    playSe('click');
     socket.emit('start_game', { room_id: currentRoomId });
 }
 
@@ -442,9 +705,58 @@ socket.on('update_room', (data) => {
 socket.on('error_msg', (data) => showError(data.message));
 socket.on('system_msg', (data) => {
     console.log("💬 [system_msg]:", data.message);
-    playActionSound();
+    // チョンボは action_chombo 送信時にも鳴らすが、自分が送り主でない場合はこの通知でしか気付けないため、
+    // ここでもメッセージ本文から検知して鳴らす（自分が送信者の場合は二重に鳴ることがあるが許容する）
+    if (typeof data.message === 'string' && data.message.includes('チョンボ')) {
+        playSe('chombo');
+    }
     showToast(data.message);
 });
+
+// state_update の差分から、鳴らすべきSEを判定して再生する
+// （討伐の順番等、サーバー側からは「何が起きたか」が単独のイベントとして届かないため、
+//   前回のstateと比較して検知する）
+function playDiffSounds(prevState, newState) {
+    if (!prevState) return;
+
+    // 他プレイヤーの河が1枚増えた＝そのプレイヤーが打牌した
+    const prevOthers = prevState.others || [];
+    const newOthers = newState.others || [];
+    newOthers.forEach((op, i) => {
+        const prevOp = prevOthers[i];
+        if (prevOp && prevOp.name === op.name) {
+            const prevLen = (prevOp.kawa || []).length;
+            const newLen = (op.kawa || []).length;
+            if (newLen > prevLen) {
+                playSe('discard_other');
+            }
+        }
+    });
+
+    // 自分の手牌が13枚→14枚に増えた＝自分がツモった
+    const prevHandLen = (parseTilesArray(prevState.my_hand || [])).length;
+    const newHandLen = (parseTilesArray(newState.my_hand || [])).length;
+    if (prevHandLen === 13 && newHandLen === 14) {
+        playSe('draw');
+    }
+
+    // 自分の手番が回ってきた瞬間
+    if (!prevState.is_my_turn && newState.is_my_turn) {
+        playSe('turn_notify');
+    }
+}
+
+// リーチ中のプレイヤーが1人でもいるかどうかで、対局中BGMを 'game' <-> 'reach' に切り替える
+function updateReachBgm(prevState, newState) {
+    const anyRiichi = (s) => Boolean(s.my_riichi) || (s.others || []).some(o => o.riichi);
+    const wasReach = prevState ? anyRiichi(prevState) : false;
+    const isReach = anyRiichi(newState);
+    if (isReach && !wasReach) {
+        playBgm('reach', 'game');
+    } else if (!isReach && wasReach) {
+        playBgm('game', 'lobby');
+    }
+}
 
 // ====================================================
 // 🀄 6. 対局画面メイン描画
@@ -452,8 +764,22 @@ socket.on('system_msg', (data) => {
 socket.on('state_update', (state) => {
     injectMahjongStyles();
 
+    const prevState = previousGameState;
+
     const screenWaiting = getElementByCandidates(['screen-waiting', 'waiting-screen']);
     const screenGame = getElementByCandidates(['screen-game', 'game-screen']);
+
+    if (!gameScreenEverShown) {
+        gameScreenEverShown = true;
+        playBgm('game', 'lobby');
+    }
+    // 新しい対局が start_game で始まった（東1局に戻った）タイミングでも対局BGMに戻す
+    if (state.hand_number === 1 && state.status === 'playing' && (!prevState || prevState.hand_number !== 1)) {
+        playBgm('game', 'lobby');
+    }
+    updateReachBgm(prevState, state);
+    playDiffSounds(prevState, state);
+    previousGameState = state;
 
     if (screenWaiting) screenWaiting.style.display = 'none';
     if (screenGame) screenGame.style.display = 'block';
@@ -585,14 +911,14 @@ socket.on('state_update', (state) => {
                     ${isMatchOver ? `
                         <div style="color:#aaa; font-size:13px;">🏁 対局終了 - 結果画面をご確認ください</div>
                     ` : isGameOver ? `
-                        <button onclick="playActionSound(); socket.emit('reset_game', {room_id: currentRoomId})" style="background:#00b894; color:#fff; border:none; padding:10px 22px; border-radius:6px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 0 12px rgba(0,184,148,0.6);">🔄 次の局へ</button>
+                        <button onclick="playSe('click'); socket.emit('reset_game', {room_id: currentRoomId})" style="background:#00b894; color:#fff; border:none; padding:10px 22px; border-radius:6px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 0 12px rgba(0,184,148,0.6);">🔄 次の局へ</button>
                     ` : `
-                        <button onclick="playActionSound(); socket.emit('action_riichi', {room_id: currentRoomId})" ${state.my_riichi ? 'disabled' : ''} style="background:${state.my_riichi ? '#555' : '#d63031'}; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:${state.my_riichi ? 'default' : 'pointer'}; opacity:${state.my_riichi ? '0.6' : '1'};">❗ ${state.my_riichi ? 'リーチ中' : 'リーチ'}</button>
-                        <button onclick="playActionSound(); socket.emit('action_pon', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">📣 ポン</button>
-                        <button onclick="playActionSound(); socket.emit('action_kan', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🔔 カン</button>
-                        <button onclick="playActionSound(); socket.emit('action_tsumo', {room_id: currentRoomId})" style="background:#e17055; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ツモ！</button>
-                        <button onclick="playActionSound(); socket.emit('action_ron', {room_id: currentRoomId})" style="background:#d63031; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ロン！</button>
-                        <button onclick="playActionSound(); socket.emit('action_chombo', {room_id: currentRoomId})" style="background:#2d3436; color:#aaa; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚨 チョンボ</button>
+                        <button onclick="playSe('riichi'); socket.emit('action_riichi', {room_id: currentRoomId})" ${state.my_riichi ? 'disabled' : ''} style="background:${state.my_riichi ? '#555' : '#d63031'}; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:${state.my_riichi ? 'default' : 'pointer'}; opacity:${state.my_riichi ? '0.6' : '1'};">❗ ${state.my_riichi ? 'リーチ中' : 'リーチ'}</button>
+                        <button onclick="playSe('pon'); socket.emit('action_pon', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">📣 ポン</button>
+                        <button onclick="playSe('kan'); socket.emit('action_kan', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🔔 カン</button>
+                        <button onclick="socket.emit('action_tsumo', {room_id: currentRoomId})" style="background:#e17055; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ツモ！</button>
+                        <button onclick="socket.emit('action_ron', {room_id: currentRoomId})" style="background:#d63031; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ロン！</button>
+                        <button onclick="playSe('chombo'); socket.emit('action_chombo', {room_id: currentRoomId})" style="background:#2d3436; color:#aaa; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚨 チョンボ</button>
                     `}
                 </div>
             </div>
@@ -740,6 +1066,17 @@ socket.on('win_result', (data) => {
 
     const isMulti = Array.isArray(data.winners);
 
+    // 静と動の落差演出：通常のロン/ツモは大仰に、役満はさらに派手な専用SEで
+    const allYaku = isMulti ? data.winners.flatMap(w => w.yaku || []) : (data.yaku || []);
+    const hasYakuman = allYaku.some(y => typeof y === 'string' && y.includes('役満'));
+    if (hasYakuman) {
+        playSe('yakuman');
+    } else if (data.type === 'ツモ') {
+        playSe('tsumo_win');
+    } else {
+        playSe('ron'); // ロン・ダブロン・トリプルロン共通
+    }
+
     if (titleElem) {
         titleElem.innerText = `🀄 ${data.type} アガリ達成！`;
     }
@@ -850,7 +1187,7 @@ function showDrawResultModal(data) {
 
 socket.on('draw_result', (data) => {
     if (actionTimer) { clearInterval(actionTimer); actionTimer = null; }
-    playActionSound();
+    playSe('draw_exhaustive');
     showDrawResultModal(data);
 });
 
@@ -892,5 +1229,6 @@ function showMatchResultModal(data) {
 
 socket.on('match_result', (data) => {
     if (actionTimer) { clearInterval(actionTimer); actionTimer = null; }
+    playBgm('result', 'game'); // bgm_result.mp3が無ければ playBgm 側のフォールバックで対局BGMのまま
     showMatchResultModal(data);
 });
