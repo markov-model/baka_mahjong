@@ -351,18 +351,41 @@ button:active { transform: translateY(0); }
 
     .center-kawa-grid {
         grid-template-columns: 56px 76px 56px !important;
-        grid-template-rows: auto 44px auto !important;
+        /* 中央セル(ロン/鳴き対象の表示)は「山札残り」表示＋捨て牌待ちの牌＋タイマーバーを
+           縦に積むため、44pxでは高さが足りず上下の河ボックス(kawa-top/kawa-bottom)に
+           内容がはみ出して重なって見えなくなる不具合があった。実際に必要な高さに合わせて拡張する。 */
+        grid-template-rows: auto 82px auto !important;
         gap: 2px !important;
         margin-top: 1px !important;
         align-items: start !important;
     }
 
     .kawa-box {
+        /* 22pxだと1行も収まらず、4枚目以降が改行されず即スクロール必須になっていた不具合を修正。
+           2行分（約36px）が見える高さを確保し、それを超える分だけスクロールで追える形にする */
         min-height: 18px !important;
-        max-height: 22px !important;
+        max-height: 46px !important;
         overflow-y: auto !important;
         padding: 1px !important;
         width: auto !important;
+    }
+
+    .center-info-box {
+        padding: 3px 4px !important;
+    }
+    .deck-count-label {
+        font-size: 7px !important;
+    }
+    .deck-count-value {
+        font-size: 13px !important;
+    }
+    .ron-target-label {
+        margin-top: 1px !important;
+        font-size: 7px !important;
+    }
+    .ron-timer-track {
+        margin-top: 2px !important;
+        height: 4px !important;
     }
 
     /* 情報バー・手番ステータス文言・山札残り表示（インラインstyleの子要素）を圧縮する */

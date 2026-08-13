@@ -951,15 +951,15 @@ socket.on('state_update', (state) => {
 
                     <div class="kawa-box" style="grid-area: kawa-left;">${renderKawaTiles(playerLeft)}</div>
                     
-                    <div style="grid-area: center-info; background:#111; border:2px solid #00b894; border-radius:10px; padding:6px 4px; text-align:center; box-shadow:0 0 12px rgba(0,184,148,0.4); display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                        <div style="font-size:9px; color:#aaa; letter-spacing:1px;">山札残り</div>
-                        <div style="font-size:22px; font-weight:bold; color:#00ffcc; text-shadow:0 0 8px rgba(0,255,204,0.7); line-height:1;">${deckCount}</div>
-                        
+                    <div class="center-info-box" style="grid-area: center-info; background:#111; border:2px solid #00b894; border-radius:10px; padding:6px 4px; text-align:center; box-shadow:0 0 12px rgba(0,184,148,0.4); display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                        <div class="deck-count-label" style="font-size:9px; color:#aaa; letter-spacing:1px;">山札残り</div>
+                        <div class="deck-count-value" style="font-size:22px; font-weight:bold; color:#00ffcc; text-shadow:0 0 8px rgba(0,255,204,0.7); line-height:1;">${deckCount}</div>
+
                         ${lastDiscardTile ? `
-                            <div style="margin-top:4px; font-size:9px; color:#ff4757; font-weight:bold;">ロン/鳴き対象</div>
+                            <div class="ron-target-label" style="margin-top:4px; font-size:9px; color:#ff4757; font-weight:bold;">ロン/鳴き対象</div>
                             <div class="tile-card tile-dora last-discard-highlight" style="width:20px; height:28px; font-size:10px; color:${lastDiscardColor};">${lastDiscardTile}</div>
-                            
-                            <div style="width:80%; height:5px; background:#333; border-radius:3px; margin-top:6px; overflow:hidden;">
+
+                            <div class="ron-timer-track" style="width:80%; height:5px; background:#333; border-radius:3px; margin-top:6px; overflow:hidden;">
                                 <div id="action-timer-fill" class="timer-bar-fill"></div>
                             </div>
                         ` : ''}
