@@ -350,7 +350,9 @@ button:active { transform: translateY(0); }
     }
 
     .center-kawa-grid {
-        grid-template-columns: 56px 76px 56px !important;
+        /* スマホ横持ちは画面が横長なので、上家・下家(kawa-left/kawa-right)の幅も
+           固定56pxではなく画面幅に応じて伸縮させ、より多くの牌を1行に収める */
+        grid-template-columns: minmax(64px, 1fr) minmax(84px, 150px) minmax(64px, 1fr) !important;
         /* 中央セル(ロン/鳴き対象の表示)は「山札残り」表示＋捨て牌待ちの牌＋タイマーバーを
            縦に積むため、44pxでは高さが足りず上下の河ボックス(kawa-top/kawa-bottom)に
            内容がはみ出して重なって見えなくなる不具合があった。実際に必要な高さに合わせて拡張する。 */
@@ -361,13 +363,14 @@ button:active { transform: translateY(0); }
     }
 
     .kawa-box {
-        /* 22pxだと1行も収まらず、4枚目以降が改行されず即スクロール必須になっていた不具合を修正。
-           2行分（約36px）が見える高さを確保し、それを超える分だけスクロールで追える形にする */
+        /* kawa-top/kawa-bottomは行全体（画面幅の大部分）を使えるようになった分、
+           列数が自動で増えて必要な行数が減るため、高さの余裕は以前より小さくて済む */
         min-height: 18px !important;
-        max-height: 46px !important;
+        max-height: 36px !important;
         overflow-y: auto !important;
         padding: 1px !important;
-        width: auto !important;
+        /* モバイルの牌サイズ(13px)に合わせて、実際に入る列数をブラウザに再計算させる */
+        grid-template-columns: repeat(auto-fill, minmax(13px, 1fr)) !important;
     }
 
     .center-info-box {

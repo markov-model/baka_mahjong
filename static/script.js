@@ -291,7 +291,9 @@ function injectMahjongStyles() {
                 "left     center    right"
                 "bottom   bottom    bottom";
             gap: 10px;
-            max-width: 1050px;
+            /* スマホ横持ち・PCとも画面は正方形より横長なので、卓の最大幅を広げて
+               その余白を中央(seat-center、河が集まる部分)に還元できるようにする */
+            max-width: 1400px;
             margin: 0 auto;
             background: radial-gradient(circle, #1e4620 0%, #0f2b11 100%);
             border: 12px solid #3e2723;
@@ -310,26 +312,32 @@ function injectMahjongStyles() {
 
         .center-kawa-grid {
             display: grid;
-            grid-template-columns: 130px 140px 130px;
-            grid-template-rows: auto 130px auto;
+            /* 自分・対面(kawa-top/kawa-bottom)は行全体を使えるようにし(下記areas参照)、
+               上家・下家(kawa-left/kawa-right)は画面が横長な分だけ幅を伸縮させる。
+               固定pxではなくminmaxにして、広い画面ほど自然に余白を還元する */
+            grid-template-columns: minmax(110px, 1fr) minmax(150px, 260px) minmax(110px, 1fr);
+            grid-template-rows: auto auto auto;
             grid-template-areas:
-                ".        kawa-top    ."
-                "kawa-left center-info kawa-right"
-                ".        kawa-bottom .";
+                "kawa-top    kawa-top    kawa-top"
+                "kawa-left   center-info kawa-right"
+                "kawa-bottom kawa-bottom kawa-bottom";
             gap: 10px;
             align-items: center;
-            justify-content: center;
+            justify-content: stretch;
             margin-top: 6px;
+            width: 100%;
         }
 
         .kawa-box {
             background: rgba(0,0,0,0.25);
             border-radius: 6px;
             padding: 4px;
-            width: 126px;
+            width: 100%;
             min-height: 60px;
             display: grid;
-            grid-template-columns: repeat(6, 1fr);
+            /* 列数を固定せず、実際に使える幅に応じて何列入るかをブラウザに計算させる。
+               画面が広いほど自動的に列数が増え、行数（＝縦の長さ）が減る */
+            grid-template-columns: repeat(auto-fill, minmax(19px, 1fr));
             gap: 1px;
             align-content: flex-start;
             justify-items: center;
@@ -957,12 +965,10 @@ socket.on('state_update', (state) => {
                 </div>
 
                 <div class="center-kawa-grid">
-                    <div></div>
                     <div class="kawa-box" style="grid-area: kawa-top;">${renderKawaTiles(playerTop)}</div>
-                    <div></div>
 
                     <div class="kawa-box" style="grid-area: kawa-left;">${renderKawaTiles(playerLeft)}</div>
-                    
+
                     <div class="center-info-box" style="grid-area: center-info; background:#111; border:2px solid #00b894; border-radius:10px; padding:6px 4px; text-align:center; box-shadow:0 0 12px rgba(0,184,148,0.4); display:flex; flex-direction:column; justify-content:center; align-items:center;">
                         <div class="deck-count-label" style="font-size:9px; color:#aaa; letter-spacing:1px;">山札残り</div>
                         <div class="deck-count-value" style="font-size:22px; font-weight:bold; color:#00ffcc; text-shadow:0 0 8px rgba(0,255,204,0.7); line-height:1;">${deckCount}</div>
@@ -979,9 +985,7 @@ socket.on('state_update', (state) => {
 
                     <div class="kawa-box" style="grid-area: kawa-right;">${renderKawaTiles(playerRight)}</div>
 
-                    <div></div>
                     <div class="kawa-box" style="grid-area: kawa-bottom;">${renderKawaTilesSelf(state)}</div>
-                    <div></div>
                 </div>
             </div>
 
@@ -1019,12 +1023,12 @@ socket.on('state_update', (state) => {
                         ` : ''}
                         <button onclick="playSe('pon'); socket.emit('action_pon', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">📣 ポン</button>
                         <button onclick="playSe('kan'); socket.emit('action_kan', {room_id: currentRoomId})" style="background:#0984e3; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🔔 カン</button>
+                        <button onclick="socket.emit('action_ron', {room_id: currentRoomId})" style="background:#d63031; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ロン！</button>
                         <button onclick="socket.emit('action_tsumo', {room_id: currentRoomId})" style="background:#e17055; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ツモ！</button>
-                        <button onclick="socket.emit('action_ron', {room_id: currentRoomId})" style="background:#d63031; color:#fff; border:none; padding:8px 14px; border-radius:6px; font-weight:bold; cursor:pointer;">🀄 ロン！${state.my_furiten ? '(フリテン注意)' : ''}</button>
                         <button onclick="playSe('chombo'); socket.emit('action_chombo', {room_id: currentRoomId})" style="background:#2d3436; color:#aaa; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚨 チョンボ</button>
                     `}
-                    ${!isMatchOver ? `<button onclick="leaveRoom()" style="background:#636e72; color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚪 退出</button>` : ''}
                     <button onclick="reportBug()" style="background:#6c5ce7; color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🐛 バグ報告</button>
+                    ${!isMatchOver ? `<button onclick="leaveRoom()" style="background:#636e72; color:#fff; border:none; padding:8px 10px; border-radius:6px; font-size:11px; cursor:pointer;">🚪 退出</button>` : ''}
                 </div>
             </div>
 
