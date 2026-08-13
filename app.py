@@ -498,7 +498,7 @@ def _expand_melds(player):
             meld_tiles.extend([m['tile']] * 4)
             kan_count += 1
             ankan_tiles.extend([m['tile']] * 4)
-        elif m['type'] == 'kan':
+        elif m['type'] in ('kan', 'kakan'):
             meld_tiles.extend([m['tile']] * 4)
             kan_count += 1
             open_meld_tiles.extend([m['tile']] * 4)
@@ -885,6 +885,11 @@ def handle_action_pon(data):
     if not clicker or clicker['id'] == room['last_discard_player']:
         return
 
+    if clicker.get('riichi'):
+        # リーチ中は面前手を崩せないためポン不可（手が変わる鳴きは一切できない）
+        emit('system_msg', {'message': "❌ リーチ中はポンできません"}, to=request.sid)
+        return
+
     if room.get('ron_claims'):
         emit('system_msg', {'message': "❌ ロンが宣言されているため鳴けません"}, to=request.sid)
         return
@@ -930,6 +935,10 @@ def handle_action_kan(data):
     target_tile = room['last_discard']
 
     if room['status'] == 'waiting_action' and clicker['id'] != room['last_discard_player']:
+        if clicker.get('riichi'):
+            # リーチ中は面前手を崩せないため明槓（大明槓）不可
+            emit('system_msg', {'message': "❌ リーチ中はカン（明槓）できません"}, to=request.sid)
+            return
         if room.get('ron_claims'):
             emit('system_msg', {'message': "❌ ロンが宣言されているため鳴けません"}, to=request.sid)
             return
@@ -1005,7 +1014,7 @@ def handle_action_kan(data):
             broadcast_state(room_id)
         elif kakan_meld is not None:
             clicker['hand'].remove(kakan_meld['tile'])
-            kakan_meld['type'] = 'kan'  # ポン済みの副露をカンへ昇格（明槓と同じ扱い）
+            kakan_meld['type'] = 'kakan'  # ポン済みの副露をカンへ昇格（点数計算上は明槓と同じ扱いだが、表示上は区別する）
 
             if room['deck']:
                 drawn = room['deck'].pop()

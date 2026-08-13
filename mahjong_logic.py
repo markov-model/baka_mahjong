@@ -208,8 +208,14 @@ def evaluate_hand(
         yakuman_count += 2
         yaku.append("🀄 四槓子 (ダブル役満)")
 
-    # 四暗刻（暗刻＝手牌のみ、または暗槓の牌で構成された刻子。鳴いた牌は含めない）
+    # 四暗刻・三暗刻（暗刻＝手牌のみ、または暗槓の牌で構成された刻子。鳴いた牌は含めない）
+    # ロン和了の場合、和了牌によってちょうど3枚目になった組は「その牌を他家からもらって完成させた」
+    # ことになるため明刻扱いとなり、暗刻には数えない（＝シャンポン待ちのロンでは四暗刻/三暗刻は
+    # 成立しない。単騎待ちなら和了牌は頭を完成させるだけなので暗刻はロンでも崩れない）。
+    # ツモ和了の場合は和了牌も自摸ってきた牌として暗刻に数えるため、この補正は行わない。
     concealed_counts = Counter(hand_tiles) + Counter(ankan_tiles)
+    if (not is_tsumo) and winning_tile is not None and concealed_counts[winning_tile] >= 3:
+        concealed_counts[winning_tile] -= 1
     concealed_triplets = sum(1 for c in concealed_counts.values() if c >= 3)
     if concealed_triplets == 4:
         yakuman_count += 1

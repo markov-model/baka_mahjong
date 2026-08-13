@@ -28,6 +28,13 @@
         <!-- エラー表示エリア -->
         <div id="entry-error" class="error-msg" style="display:none; color:#ff3366; background:rgba(255,51,102,0.15); padding:8px; border-radius:6px; margin-bottom:12px; font-weight:bold;"></div>
 
+        <!-- 接続切れ等で自動再接続に失敗した場合の手動復帰ボタン -->
+        <div id="entry-reconnect-box" style="display:none; margin-bottom:20px; background:rgba(255,215,0,0.08); border:1px solid rgba(255,215,0,0.4); border-radius:8px; padding:12px;">
+            <p style="font-size:13px; color:#ffd700; margin:0 0 8px 0;">前回参加していた部屋があります</p>
+            <div id="entry-reconnect-info" style="font-size:13px; margin-bottom:8px;"></div>
+            <button class="btn-primary" onclick="manualReturnToRoom()" style="width:80%; padding:10px; font-size:15px;">🔄 部屋に復帰する</button>
+        </div>
+
         <div style="margin-bottom: 20px;">
             <label for="username" style="display:block; margin-bottom:6px; font-weight:bold;">プレイヤー名</label>
             <input type="text" id="username" placeholder="名前を入力（例: 雀神）" value="プレイヤー1">

@@ -621,12 +621,20 @@ window.handleTileClick = function(elem) {
 // 復帰できるように、プレイヤー名と部屋コードを保持しておく。
 // ※ localStorage は同一オリジンの全タブ/全ウィンドウで共有されてしまい、
 //   「別タブを新しく開いただけで直前の部屋へ勝手に再参加してしまう」事故の元になるため、
-//   タブ単位で分離される sessionStorage を使う（ページの再読み込みには問題なく残る）。
+//   自動での無言の再参加（attemptRejoin）には タブ単位で分離される sessionStorage のみを使う。
+//   一方、スマホでアプリごと落とされた後の再読み込みなどでは sessionStorage も消えてしまい
+//   自動再接続が効かないことがあるため、「手動で押す復帰ボタン」専用のバックアップとして
+//   localStorage にも同じ情報を保存しておく（ユーザーが明示的にボタンを押した時にしか
+//   使わないので、別タブが勝手に入室してしまう事故にはならない）。
 function persistSession(username, roomId) {
     try {
         sessionStorage.setItem('mahjong_username', username);
         sessionStorage.setItem('mahjong_room_id', roomId);
     } catch (e) { /* sessionStorageが使えない環境では何もしない */ }
+    try {
+        localStorage.setItem('mahjong_last_username', username);
+        localStorage.setItem('mahjong_last_room_id', roomId);
+    } catch (e) { /* localStorageが使えない環境では何もしない */ }
 }
 
 function clearSession() {
@@ -634,6 +642,11 @@ function clearSession() {
         sessionStorage.removeItem('mahjong_username');
         sessionStorage.removeItem('mahjong_room_id');
     } catch (e) {}
+    try {
+        localStorage.removeItem('mahjong_last_username');
+        localStorage.removeItem('mahjong_last_room_id');
+    } catch (e) {}
+    hideReconnectBox();
 }
 
 // Socket.IOが（再読み込みなしでも）接続/再接続した際に呼ばれる。
@@ -655,7 +668,97 @@ function attemptRejoin() {
 
 socket.on('connect', () => {
     attemptRejoin();
+    renderEntryReconnectBox();
 });
+
+// 対局中にソケットが切断されると、自動再接続が効かないことがあり、その場合
+// 対局画面が固まったまま何もできなくなってしまう。目立つバナーを出し、
+// いつでも手動でリトライできるようにする。
+socket.on('disconnect', () => {
+    if (currentRoomId) showDisconnectBanner();
+});
+
+let reconnectBannerEl = null;
+function ensureDisconnectBanner() {
+    if (reconnectBannerEl) return reconnectBannerEl;
+    const el = document.createElement('div');
+    el.id = 'disconnect-banner';
+    el.style.cssText = 'display:none; position:fixed; top:0; left:0; right:0; z-index:9999; background:#d63031; color:#fff; padding:10px 14px; font-size:13px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+    el.innerHTML = `
+        <span>⚠️ 接続が切れました</span>
+        <button onclick="manualReconnect()" style="margin-left:10px; background:#fff; color:#d63031; border:none; padding:4px 12px; border-radius:6px; font-weight:bold; cursor:pointer;">🔄 今すぐ再接続</button>
+    `;
+    document.body.appendChild(el);
+    reconnectBannerEl = el;
+    return el;
+}
+
+function showDisconnectBanner() {
+    ensureDisconnectBanner().style.display = 'block';
+}
+
+function hideDisconnectBanner() {
+    if (reconnectBannerEl) reconnectBannerEl.style.display = 'none';
+}
+
+// バナーの「今すぐ再接続」ボタン：自動再接続の完了を待たず、その場で明示的にリトライする
+function manualReconnect() {
+    playSe('click');
+    if (!socket.connected) {
+        socket.connect();
+    } else {
+        attemptRejoin();
+    }
+}
+
+// エントリー画面用「前回の部屋に復帰する」ボタン：sessionStorageが失われて
+// 自動再接続が効かなかった場合の手動フォールバック（localStorageの情報を使う）
+function getLastSession() {
+    try {
+        const username = localStorage.getItem('mahjong_last_username');
+        const roomId = localStorage.getItem('mahjong_last_room_id');
+        if (username && roomId) return { username, roomId };
+    } catch (e) {}
+    return null;
+}
+
+function renderEntryReconnectBox() {
+    const box = document.getElementById('entry-reconnect-box');
+    const info = document.getElementById('entry-reconnect-info');
+    if (!box || !info) return;
+    const last = getLastSession();
+    if (last) {
+        info.innerText = `部屋コード: ${last.roomId}（${last.username}）`;
+        box.style.display = 'block';
+    } else {
+        box.style.display = 'none';
+    }
+}
+
+function hideReconnectBox() {
+    const box = document.getElementById('entry-reconnect-box');
+    if (box) box.style.display = 'none';
+}
+
+function manualReturnToRoom() {
+    clearError();
+    const last = getLastSession();
+    if (!last) {
+        showError('復帰できる部屋の情報がありません');
+        return;
+    }
+    playSe('click');
+    myUsername = last.username;
+    const doJoin = () => socket.emit('join_room', { username: last.username, room_id: last.roomId });
+    if (!socket.connected) {
+        socket.once('connect', doJoin);
+        socket.connect();
+    } else {
+        doJoin();
+    }
+}
+
+renderEntryReconnectBox();
 
 // ====================================================
 // 🎮 5. エントリー操作 & Socket.IO
@@ -716,6 +819,7 @@ function leaveRoom() {
 
 socket.on('room_left', () => {
     clearSession();
+    hideDisconnectBanner();
     currentRoomId = null;
     isHost = false;
     const screenEntry = getElementByCandidates(['screen-entry', 'entry-screen']);
@@ -736,6 +840,9 @@ socket.on('room_joined', (data) => {
     currentRoomId = data.room_id;
     isHost = data.is_host;
     persistSession(myUsername, currentRoomId);
+    hideDisconnectBanner();
+    hideReconnectBox();
+    clearError();
     const screenEntry = getElementByCandidates(['screen-entry', 'entry-screen']);
     const screenWaiting = getElementByCandidates(['screen-waiting', 'waiting-screen']);
     const displayRoomCode = getElementByCandidates(['display-room-code', 'room-code-display']);
@@ -877,6 +984,7 @@ function updateReachBgm(prevState, newState) {
 // ====================================================
 socket.on('state_update', (state) => {
     injectMahjongStyles();
+    hideDisconnectBanner();
 
     const prevState = previousGameState;
 
@@ -1059,7 +1167,7 @@ socket.on('state_update', (state) => {
 // 副露(ポン・カン)を1グループ単位で描画する。鳴いた牌には方向ラベルを付け、横向きに回す
 function meldTileCount(type) {
     if (type === 'pon') return 3;
-    if (type === 'kan' || type === 'ankan') return 4;
+    if (type === 'kan' || type === 'ankan' || type === 'kakan') return 4;
     return 3;
 }
 
@@ -1069,6 +1177,7 @@ function renderMeldGroup(meld, isVertical) {
     const type = (typeof meld === 'object' && meld.type) ? meld.type : 'pon';
     const fromLabel = (typeof meld === 'object' && meld.from) ? meld.from : '';
     const isAnkan = type === 'ankan';
+    const isKakan = type === 'kakan';
     const count = meldTileCount(type);
 
     const tileClass = isVertical ? 'tile-v-meld' : 'tile-meld';
@@ -1082,8 +1191,9 @@ function renderMeldGroup(meld, isVertical) {
         tilesHtml += `<div class="${tileClass}" style="${rotateStyle} color:${meldColor};">${isAnkan && (i === 0 || i === count - 1) ? '🀫' : formatTile(tileVal)}</div>`;
     }
 
-    const badgeText = isAnkan ? '暗槓' : (fromLabel || '');
-    const borderColor = isAnkan ? '#636e72' : '#00b894';
+    // 加槓（かかん）は明槓・ポンと区別できるよう、専用バッジ色にする
+    const badgeText = isAnkan ? '暗槓' : (isKakan ? `加槓${fromLabel ? '・' + fromLabel : ''}` : (fromLabel || ''));
+    const borderColor = isAnkan ? '#636e72' : (isKakan ? '#e17055' : '#00b894');
 
     return `
         <div style="position:relative; z-index:1; display:inline-flex; ${isVertical ? 'flex-direction:column;' : 'flex-direction:row;'} align-items:center; gap:1px; border:1px solid ${borderColor}; border-radius:5px; padding:3px 4px; margin:2px;">
