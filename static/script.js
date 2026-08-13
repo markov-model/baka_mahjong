@@ -376,6 +376,13 @@ function injectMahjongStyles() {
             box-shadow: 0 0 8px #ff4757 !important;
         }
 
+        /* ロン/鳴き対象の表示(中央情報ボックス)は、万一他の要素と重なっても
+           必ず最前面に来るようにしておく（河ボックス等より奥に隠れて見えなくなるのを防ぐ） */
+        .center-info-box {
+            position: relative;
+            z-index: 50;
+        }
+
         .timer-bar-fill {
             height: 100%;
             background: linear-gradient(to right, #00ffcc, #ff4757);
@@ -918,7 +925,7 @@ socket.on('state_update', (state) => {
 
     screenGame.innerHTML = `
         <div class="mahjong-table-grid">
-            
+
             <!-- 対面 -->
             <div class="seat-top">
                 ${renderOpponentCard(playerTop, '対面', false)}
