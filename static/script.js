@@ -703,6 +703,8 @@ socket.on('room_left', () => {
     if (screenGame) screenGame.style.display = 'none';
     if (screenWaiting) screenWaiting.style.display = 'none';
     if (screenEntry) screenEntry.style.display = 'block';
+    const titleHeading = document.querySelector('h1');
+    if (titleHeading) titleHeading.style.display = '';
     const mrm = document.getElementById('match-result-modal');
     if (mrm) mrm.style.display = 'none';
     const wm = document.getElementById('win-modal');
@@ -874,6 +876,9 @@ socket.on('state_update', (state) => {
 
     if (screenWaiting) screenWaiting.style.display = 'none';
     if (screenGame) screenGame.style.display = 'block';
+    // タイトル見出しは対局プレイ中は不要なため非表示にし、卓画面を広く使えるようにする
+    const titleHeading = document.querySelector('h1');
+    if (titleHeading) titleHeading.style.display = 'none';
 
     isMyTurn = Boolean(state.is_my_turn || state.is_turn || state.my_turn);
     if (typeof state.my_is_host === 'boolean') {
