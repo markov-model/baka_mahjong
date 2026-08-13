@@ -311,7 +311,7 @@ button:active { transform: translateY(0); }
    ==================================================== */
 @media screen and (orientation: landscape) and (max-height: 520px) {
     body {
-        padding: 4px !important;
+        padding: 2px !important;
     }
 
     h1 {
@@ -335,9 +335,9 @@ button:active { transform: translateY(0); }
 
     .mahjong-table-grid {
         grid-template-columns: 70px 1fr 70px !important;
-        gap: 2px !important;
-        padding: 2px !important;
-        border-width: 3px !important;
+        gap: 1px !important;
+        padding: 1px !important;
+        border-width: 2px !important;
         max-width: 100% !important;
     }
 
@@ -353,117 +353,55 @@ button:active { transform: translateY(0); }
         /* スマホ横持ちは画面が横長なので、上家・下家(kawa-left/kawa-right)の幅も
            固定56pxではなく画面幅に応じて伸縮させ、より多くの牌を1行に収める */
         grid-template-columns: minmax(64px, 1fr) minmax(84px, 150px) minmax(64px, 1fr) !important;
-        /* 中央セル(ロン/鳴き対象の表示)は「山札残り」表示＋捨て牌待ちの牌＋タイマーバーを
-           縦に積むため、44pxでは高さが足りず上下の河ボックス(kawa-top/kawa-bottom)に
-           内容がはみ出して重なって見えなくなる不具合があった。実際に必要な高さに合わせて拡張する。 */
-        grid-template-rows: auto 82px auto !important;
+        /* kawa-top/kawa-bottomは専用の行を持つようになった（kawa-left/kawa-rightと同じ行を
+           共有しない）ため、中央セルの高さを固定pxで決め打ちする必要がなくなった。
+           auto行はその時々の実際のコンテンツ高さ（ロン/鳴き対象の表示有無など）に
+           自然に追従するので、以前のような重なりの心配なく高さの無駄も出ない */
         gap: 2px !important;
         margin-top: 1px !important;
         align-items: start !important;
     }
 
     .kawa-box {
-        /* kawa-top/kawa-bottomは行全体（画面幅の大部分）を使えるようになった分、
-           列数が自動で増えて必要な行数が減るため、高さの余裕は以前より小さくて済む */
-        min-height: 18px !important;
-        max-height: 36px !important;
-        overflow-y: auto !important;
+        /* 高さ・列数は script.js 側の clamp()/auto-fill による連続スケーリングに任せる
+           （固定pxでの2段階切り替えをやめたため、ここでの上書きは不要になった） */
         padding: 1px !important;
-        /* モバイルの牌サイズ(13px)に合わせて、実際に入る列数をブラウザに再計算させる */
-        grid-template-columns: repeat(auto-fill, minmax(13px, 1fr)) !important;
     }
 
     .center-info-box {
         padding: 3px 4px !important;
-    }
-    .deck-count-label {
-        font-size: 7px !important;
-    }
-    .deck-count-value {
-        font-size: 13px !important;
-    }
-    .ron-target-label {
-        margin-top: 1px !important;
-        font-size: 7px !important;
     }
     .ron-timer-track {
         margin-top: 2px !important;
         height: 4px !important;
     }
 
-    /* 情報バー・手番ステータス文言・山札残り表示（インラインstyleの子要素）を圧縮する */
+    /* フォントサイズは script.js 側の clamp(min(vw, vh)) による連続スケーリングに
+       一本化したため、ここでの固定px上書き（山札残り・ロン/鳴き対象ラベル等）は廃止した
+       （2段階切り替えの不自然さと、22px固定の和了牌表示が中央セルからはみ出す原因だったため） */
     .seat-center > div:first-child {
         padding: 2px 4px !important;
         margin-bottom: 2px !important;
     }
-    .seat-center > div:first-child * {
-        font-size: 9px !important;
+    .seat-center > div:first-child *,
+    .seat-center > div:nth-child(2) {
+        font-size: clamp(8px, min(1.4vw, 2.2vh), 13px) !important;
     }
     .seat-center > div:nth-child(2) {
-        font-size: 9px !important;
         margin-bottom: 2px !important;
     }
     [style*="grid-area: center-info"] {
         padding: 2px !important;
     }
-    [style*="grid-area: center-info"] * {
-        font-size: 8px !important;
-    }
-    [style*="grid-area: center-info"] div[style*="font-size:22px"] {
-        font-size: 14px !important;
-    }
-
-    .tile-my-hand {
-        width: 26px !important;
-        height: 36px !important;
-        font-size: 10px !important;
-        margin: 1px !important;
-    }
-
-    .tile-dora {
-        width: 16px !important;
-        height: 23px !important;
-        font-size: 8px !important;
-    }
-
-    .tile-kawa {
-        width: 13px !important;
-        height: 18px !important;
-        font-size: 6px !important;
-    }
-
-    .tile-hidden {
-        width: 11px !important;
-        height: 17px !important;
-        font-size: 6px !important;
-    }
-
-    .tile-v-hidden {
-        width: 17px !important;
-        height: 11px !important;
-        font-size: 5px !important;
-    }
-
-    .tile-meld {
-        width: 14px !important;
-        height: 19px !important;
-        font-size: 7px !important;
-    }
-
-    .tile-v-meld {
-        width: 19px !important;
-        height: 14px !important;
-        font-size: 6px !important;
-    }
 
     .seat-bottom {
-        padding: 3px !important;
+        padding: 2px !important;
     }
     .seat-bottom > div:first-child {
         margin-bottom: 2px !important;
     }
     .seat-bottom > div:first-child * {
-        font-size: 10px !important;
+        font-size: clamp(9px, min(1.6vw, 2.5vh), 15px) !important;
     }
 
     #my-hand-container {
@@ -476,8 +414,8 @@ button:active { transform: translateY(0); }
     }
 
     #action-buttons-container button {
-        padding: 3px 6px !important;
-        font-size: 10px !important;
+        padding: clamp(2px, 0.8vh, 8px) clamp(4px, 1.2vw, 14px) !important;
+        font-size: clamp(9px, min(1.5vw, 2.3vh), 14px) !important;
     }
 
     .seat-top > div, .seat-right > div {
@@ -485,7 +423,7 @@ button:active { transform: translateY(0); }
     }
     .seat-top > div > div:first-child *,
     .seat-right > div > div:first-child * {
-        font-size: 9px !important;
+        font-size: clamp(8px, min(1.3vw, 2vh), 11px) !important;
     }
 
     .win-modal-content,

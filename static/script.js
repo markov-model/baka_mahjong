@@ -333,11 +333,16 @@ function injectMahjongStyles() {
             border-radius: 6px;
             padding: 4px;
             width: 100%;
-            min-height: 60px;
+            min-height: clamp(22px, 8vh, 60px);
+            /* 高さも画面サイズに応じて連続的に変化させる。それでも収まりきらない分だけ
+               スクロールで追える（min-heightと同じ考え方で狭い画面ほど小さくなる） */
+            max-height: clamp(34px, 15vh, 160px);
+            overflow-y: auto;
             display: grid;
             /* 列数を固定せず、実際に使える幅に応じて何列入るかをブラウザに計算させる。
-               画面が広いほど自動的に列数が増え、行数（＝縦の長さ）が減る */
-            grid-template-columns: repeat(auto-fill, minmax(19px, 1fr));
+               画面が広いほど自動的に列数が増え、行数（＝縦の長さ）が減る。
+               最小列幅は牌自体の最小サイズ(clampの下限, 13px)に合わせておく */
+            grid-template-columns: repeat(auto-fill, minmax(13px, 1fr));
             gap: 1px;
             align-content: flex-start;
             justify-items: center;
@@ -358,23 +363,27 @@ function injectMahjongStyles() {
             user-select: none;
         }
 
-        .tile-my-hand { width: 40px; height: 56px; font-size: 16px; margin: 2px; cursor: pointer; transition: transform 0.1s; }
+        /* 牌のサイズは「PC用」「スマホ横向き用」の2段階の固定pxを持つのをやめ、
+           min(Nvw, Mvh) を使って画面の幅・高さのうち狭い方を基準に連続的にスケールさせる。
+           これにより、画面サイズが2択のどちらにも当てはまらない端末（縦長スマホの横向きなど）でも
+           不自然に大きすぎたり小さすぎたりせず、なめらかに最適なサイズへ収まる */
+        .tile-my-hand { width: clamp(26px, min(4.4vw, 7vh), 42px); height: clamp(36px, min(6.2vw, 9.8vh), 58px); font-size: clamp(11px, min(1.8vw, 2.9vh), 16px); margin: 2px; cursor: pointer; transition: transform 0.1s; }
         .tile-my-hand:hover { transform: translateY(-4px); background: #ffffff; }
-        .tile-dora    { width: 24px; height: 34px; font-size: 11px; margin: 0 1px; }
-        .tile-kawa    { width: 19px; height: 27px; font-size: 9px; margin: 0.5px; }
-        .tile-meld    { width: 22px; height: 31px; font-size: 10px; background: #e8f4f8; color: #111; border-color: #00b894; margin: 1px; }
-        .tile-hidden  { width: 18px; height: 28px; background: linear-gradient(135deg, #1b4332, #081c15); border: 1px solid #40916c; color: #52b788; font-size: 9px; }
+        .tile-dora    { width: clamp(16px, min(2.5vw, 4vh), 24px); height: clamp(23px, min(3.6vw, 5.7vh), 34px); font-size: clamp(8px, min(1.1vw, 1.7vh), 11px); margin: 0 1px; }
+        .tile-kawa    { width: clamp(13px, min(2vw, 3.2vh), 19px); height: clamp(18px, min(2.8vw, 4.5vh), 27px); font-size: clamp(6px, min(0.9vw, 1.4vh), 9px); margin: 0.5px; }
+        .tile-meld    { width: clamp(15px, min(2.3vw, 3.6vh), 22px); height: clamp(20px, min(3.2vw, 5.1vh), 31px); font-size: clamp(7px, min(1vw, 1.6vh), 10px); background: #e8f4f8; color: #111; border-color: #00b894; margin: 1px; }
+        .tile-hidden  { width: clamp(12px, min(1.9vw, 3vh), 18px); height: clamp(18px, min(2.9vw, 4.6vh), 28px); background: linear-gradient(135deg, #1b4332, #081c15); border: 1px solid #40916c; color: #52b788; font-size: clamp(6px, min(0.9vw, 1.4vh), 9px); }
 
         .tile-v-hidden {
-            width: 28px; height: 18px;
+            width: clamp(18px, min(2.9vw, 4.6vh), 28px); height: clamp(12px, min(1.9vw, 3vh), 18px);
             background: linear-gradient(180deg, #1b4332, #081c15);
             border: 1px solid #40916c; border-radius: 3px;
-            color: #52b788; font-size: 8px;
+            color: #52b788; font-size: clamp(5px, min(0.8vw, 1.3vh), 8px);
             display: flex; align-items: center; justify-content: center;
         }
 
         .tile-v-meld {
-            width: 31px; height: 22px; font-size: 9px;
+            width: clamp(20px, min(3.2vw, 5.1vh), 31px); height: clamp(15px, min(2.3vw, 3.6vh), 22px); font-size: clamp(6px, min(1vw, 1.6vh), 9px);
             background: #e8f4f8; border: 1px solid #00b894; color: #111; font-weight: bold;
             display: flex; align-items: center; justify-content: center; margin: 1px 0;
         }
@@ -390,6 +399,10 @@ function injectMahjongStyles() {
             position: relative;
             z-index: 50;
         }
+
+        .deck-count-label { font-size: clamp(7px, min(1.1vw, 1.7vh), 9px); }
+        .deck-count-value { font-size: clamp(13px, min(2.5vw, 3.9vh), 22px); }
+        .ron-target-label { font-size: clamp(7px, min(1.1vw, 1.7vh), 9px); }
 
         .timer-bar-fill {
             height: 100%;
@@ -969,15 +982,15 @@ socket.on('state_update', (state) => {
 
                     <div class="kawa-box" style="grid-area: kawa-left;">${renderKawaTiles(playerLeft)}</div>
 
-                    <div class="center-info-box" style="grid-area: center-info; background:#111; border:2px solid #00b894; border-radius:10px; padding:6px 4px; text-align:center; box-shadow:0 0 12px rgba(0,184,148,0.4); display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                        <div class="deck-count-label" style="font-size:9px; color:#aaa; letter-spacing:1px;">山札残り</div>
-                        <div class="deck-count-value" style="font-size:22px; font-weight:bold; color:#00ffcc; text-shadow:0 0 8px rgba(0,255,204,0.7); line-height:1;">${deckCount}</div>
+                    <div class="center-info-box" style="grid-area: center-info; background:#111; border:2px solid #00b894; border-radius:10px; padding:4px; text-align:center; box-shadow:0 0 12px rgba(0,184,148,0.4); display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                        <div class="deck-count-label" style="color:#aaa; letter-spacing:1px;">山札残り</div>
+                        <div class="deck-count-value" style="font-weight:bold; color:#00ffcc; text-shadow:0 0 8px rgba(0,255,204,0.7); line-height:1;">${deckCount}</div>
 
                         ${lastDiscardTile ? `
-                            <div class="ron-target-label" style="margin-top:4px; font-size:9px; color:#ff4757; font-weight:bold;">ロン/鳴き対象</div>
-                            <div class="tile-card tile-dora last-discard-highlight" style="width:20px; height:28px; font-size:10px; color:${lastDiscardColor};">${lastDiscardTile}</div>
+                            <div class="ron-target-label" style="margin-top:2px; color:#ff4757; font-weight:bold;">ロン/鳴き対象</div>
+                            <div class="tile-card tile-kawa last-discard-highlight" style="color:${lastDiscardColor};">${lastDiscardTile}</div>
 
-                            <div class="ron-timer-track" style="width:80%; height:5px; background:#333; border-radius:3px; margin-top:6px; overflow:hidden;">
+                            <div class="ron-timer-track" style="width:80%; height:4px; background:#333; border-radius:3px; margin-top:3px; overflow:hidden;">
                                 <div id="action-timer-fill" class="timer-bar-fill"></div>
                             </div>
                         ` : ''}
@@ -1098,13 +1111,19 @@ function renderOpponentCard(op, positionLabel, isVertical = false) {
         : '';
 
     // 対面(横並び)は折り返すと縦に伸びて画面(特にスマホ横向きの低い高さ)を圧迫するため、
-    // 折り返さず横スクロールにする（上家/下家の縦並びは元々 max-height+overflow-y で高さを制限済み）
+    // 折り返さず横スクロールにする。上家/下家(isVertical)は逆に「縦に長い1列」だと
+    // 手牌13枚+槓分がそのまま高さになってしまう（かつては280pxの縦積みで、その行全体を
+    // 圧迫していた）ため、高さ4枚を1列として横に増えていくグリッドに変更する
     const containerStyle = isVertical
-        ? 'display:flex; flex-direction:column; align-items:center; gap:2px; background:rgba(0,0,0,0.2); padding:4px; border-radius:4px; max-height:280px; overflow-y:auto;'
+        ? 'display:flex; flex-direction:column; align-items:flex-start; gap:2px; background:rgba(0,0,0,0.2); padding:4px; border-radius:4px;'
         : 'display:flex; flex-wrap:nowrap; overflow-x:auto; max-width:100%; align-items:center; gap:2px; background:rgba(0,0,0,0.2); padding:3px; border-radius:4px;';
 
+    const handGridStyle = isVertical
+        ? 'display:grid; grid-auto-flow:column; grid-template-rows:repeat(4, auto); gap:1px;'
+        : 'display:flex; flex-wrap:nowrap; gap:1px;';
+
     const meldDividerStyle = isVertical
-        ? 'border-top:1px dashed #00b894; margin-top:4px; padding-top:4px; display:flex; flex-direction:column; align-items:center; flex-wrap:wrap;'
+        ? 'border-top:1px dashed #00b894; margin-top:2px; padding-top:2px; display:grid; grid-auto-flow:column; grid-template-rows:repeat(4, auto); gap:1px;'
         : 'border-left:1px dashed #00b894; margin-left:4px; padding-left:4px; display:inline-flex; flex-wrap:wrap; align-items:center;';
 
     return `
@@ -1114,9 +1133,9 @@ function renderOpponentCard(op, positionLabel, isVertical = false) {
                 <span style="color:#ffd700; font-size:10px;">${op.is_turn ? '◀' : ''}</span>
             </div>
             <div style="font-size:11px; color:#00ffcc; margin-bottom:4px;">${op.score_str || op.score || 0}点</div>
-            
+
             <div style="${containerStyle}">
-                <div style="display:flex; ${isVertical ? 'flex-direction:column;' : 'flex-wrap:nowrap;'} gap:1px;">${hiddenHandHtml}</div>
+                <div style="${handGridStyle}">${hiddenHandHtml}</div>
                 ${meldsHtml ? `<div style="${meldDividerStyle}">${meldsHtml}</div>` : ''}
             </div>
         </div>
@@ -1250,8 +1269,19 @@ socket.on('win_result', (data) => {
                     : `color:${getTileColor(t)};`;
                 return `<div class="tile-card tile-kawa" style="${style}" title="${isWinTile ? '和了牌' : ''}">${formatTile(t)}</div>`;
             }).join('');
-            const meldsHtml = (melds || []).map(m => `<div class="tile-card tile-kawa" style="color:${getTileColor(m.tile)}; border-color:#00b894;">${formatTile(m.tile)}</div>`).join('');
-            return `<div style="display:flex; flex-wrap:wrap; gap:2px; margin-top:4px;">${handHtml}${meldsHtml}</div>`;
+            // 副露は種類ごとに実際の枚数（ポン=3枚, カン/暗槓=4枚）で展開し、
+            // 1つの副露グループごとに間隔を空けて表示する（どこまでが1組か分かりやすくするため）
+            const meldsHtml = (melds || []).map(m => {
+                const count = meldTileCount(m.type);
+                const tiles = Array.from({length: count}, () =>
+                    `<div class="tile-card tile-kawa" style="color:${getTileColor(m.tile)}; border-color:#00b894;">${formatTile(m.tile)}</div>`
+                ).join('');
+                return `<div style="display:flex; gap:2px;">${tiles}</div>`;
+            }).join('');
+            return `<div style="display:flex; flex-wrap:wrap; align-items:center; gap:2px; margin-top:4px;">
+                <div style="display:flex; flex-wrap:wrap; gap:2px;">${handHtml}</div>
+                ${meldsHtml ? `<div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-left:8px; padding-left:8px; border-left:1px dashed rgba(255,255,255,0.25);">${meldsHtml}</div>` : ''}
+            </div>`;
         };
 
         if (isMulti) {
