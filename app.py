@@ -31,6 +31,7 @@ ROUND_WIND_TILE = 7  # 東風戦なので場風は常に東
 # 得点スケール（実際の麻雀に近いスケール）
 INITIAL_SCORE = 100000      # 初期持ち点: 10万点
 CHOMBO_PENALTY = 32000      # チョンボ罰符: 役満と同スケール
+DEALER_CHOMBO_PENALTY = 48000  # 親のチョンボ罰符（実際の麻雀の親満貫と同様、親は罰符も重くする）
 NAGASHI_MANGAN_SCORE = 8000  # 流しマンガンは満貫相当
 NOTEN_PENALTY_TOTAL = 3000   # 流局時のテンパイ料（聴牌者で総取り、ノーテン者で均等負担）
 RIICHI_STICK_COST = 10000   # リーチ棒: リーチ宣言時に場に供託する点数
@@ -47,12 +48,15 @@ def create_initial_deck(num_players=4):
 
 def apply_chombo(room, room_id, offender, reason=""):
     """チョンボ罰符処理。offenderから罰符を引き、他家へ均等に分配する。
+    親のチョンボは実際の麻雀の親満貫同様、罰符も重くする（48000点）。
     socketio.emit を使うため、リクエストコンテキスト外（バックグラウンドスレッド）からも呼び出せる。
     reason はバグ報告機能用に、直近のチョンボ理由として offender に記録する。"""
+    is_dealer = (room['players'].index(offender) == room.get('dealer_idx', 0))
+    penalty = DEALER_CHOMBO_PENALTY if is_dealer else CHOMBO_PENALTY
     other_players = [p for p in room['players'] if p['id'] != offender['id']]
-    offender['score'] -= CHOMBO_PENALTY
+    offender['score'] -= penalty
     if other_players:
-        share = CHOMBO_PENALTY // len(other_players)
+        share = penalty // len(other_players)
         for p in other_players:
             p['score'] += share
     offender['last_chombo_info'] = {
@@ -61,13 +65,13 @@ def apply_chombo(room, room_id, offender, reason=""):
         'melds': [dict(m) for m in offender['melds']],
     }
     reason_text = f"（{reason}）" if reason else ""
-    socketio.emit('system_msg', {'message': f"🚨 チョンボ！ {offender['name']} さんの錯和です{reason_text}（-{format_big_number(CHOMBO_PENALTY)}点）"}, room=room_id)
+    socketio.emit('system_msg', {'message': f"🚨 チョンボ！ {offender['name']} さんの錯和です{reason_text}（-{format_big_number(penalty)}点）"}, room=room_id)
     # 詳細ポップアップ（手牌を含む）は本人にのみ表示する。チョンボはあくまで誤操作であり、
     # 和了とは違って手牌を他家に公開する理由がないため、他のプレイヤーには見せない。
     socketio.emit('chombo_result', {
         'offender': offender['name'],
         'reason': reason or '不明な理由',
-        'penalty': format_big_number(CHOMBO_PENALTY),
+        'penalty': format_big_number(penalty),
         'hand': list(offender['hand']),
         'melds': [dict(m) for m in offender['melds']],
     }, to=offender['id'])
@@ -886,8 +890,10 @@ def handle_action_pon(data):
         return
 
     if clicker.get('riichi'):
-        # リーチ中は面前手を崩せないためポン不可（手が変わる鳴きは一切できない）
-        emit('system_msg', {'message': "❌ リーチ中はポンできません"}, to=request.sid)
+        # リーチ中は面前手を崩せないためポン不可（手が変わる鳴きは一切できない）。
+        # 単に弾くのではなく、誤った宣言としてチョンボにする
+        apply_chombo(room, room_id, clicker, reason="リーチ中にポンを宣言した（面前手は崩せない）")
+        broadcast_state(room_id)
         return
 
     if room.get('ron_claims'):
@@ -936,8 +942,10 @@ def handle_action_kan(data):
 
     if room['status'] == 'waiting_action' and clicker['id'] != room['last_discard_player']:
         if clicker.get('riichi'):
-            # リーチ中は面前手を崩せないため明槓（大明槓）不可
-            emit('system_msg', {'message': "❌ リーチ中はカン（明槓）できません"}, to=request.sid)
+            # リーチ中は面前手を崩せないため明槓（大明槓）不可。
+            # 単に弾くのではなく、誤った宣言としてチョンボにする
+            apply_chombo(room, room_id, clicker, reason="リーチ中に明槓を宣言した（面前手は崩せない）")
+            broadcast_state(room_id)
             return
         if room.get('ron_claims'):
             emit('system_msg', {'message': "❌ ロンが宣言されているため鳴けません"}, to=request.sid)

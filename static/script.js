@@ -315,7 +315,7 @@ function injectMahjongStyles() {
             /* 自分・対面(kawa-top/kawa-bottom)は行全体を使えるようにし(下記areas参照)、
                上家・下家(kawa-left/kawa-right)は画面が横長な分だけ幅を伸縮させる。
                固定pxではなくminmaxにして、広い画面ほど自然に余白を還元する */
-            grid-template-columns: minmax(110px, 1fr) minmax(150px, 260px) minmax(110px, 1fr);
+            grid-template-columns: minmax(130px, 1fr) minmax(150px, 260px) minmax(130px, 1fr);
             grid-template-rows: auto auto auto;
             grid-template-areas:
                 "kawa-top    kawa-top    kawa-top"
@@ -334,9 +334,10 @@ function injectMahjongStyles() {
             padding: 4px;
             width: 100%;
             min-height: clamp(22px, 8vh, 60px);
-            /* 高さも画面サイズに応じて連続的に変化させる。それでも収まりきらない分だけ
-               スクロールで追える（min-heightと同じ考え方で狭い画面ほど小さくなる） */
-            max-height: clamp(34px, 15vh, 160px);
+            /* 高さも画面サイズに応じて連続的に変化させる。流局間際の最大想定枚数（約38枚）
+               でも上家・下家の河（幅が狭い分、行数が多くなりやすい）にスクロールバーが
+               出ないよう、上限を余裕を持って引き上げてある */
+            max-height: clamp(40px, 22vh, 220px);
             overflow-y: auto;
             display: grid;
             /* 列数を固定せず、実際に使える幅に応じて何列入るかをブラウザに計算させる。
@@ -810,14 +811,7 @@ function reportBug() {
     socket.emit('action_bug_report', { room_id: currentRoomId });
 }
 
-function leaveRoom() {
-    if (!currentRoomId) return;
-    if (!confirm('部屋を退出しますか？')) return;
-    playSe('click');
-    socket.emit('leave_room', { room_id: currentRoomId });
-}
-
-socket.on('room_left', () => {
+function resetToEntryScreen() {
     clearSession();
     hideDisconnectBanner();
     currentRoomId = null;
@@ -834,6 +828,26 @@ socket.on('room_left', () => {
     if (mrm) mrm.style.display = 'none';
     const wm = document.getElementById('win-modal');
     if (wm) wm.style.display = 'none';
+}
+
+function leaveRoom() {
+    if (!currentRoomId) return;
+    if (!confirm('部屋を退出しますか？')) return;
+    playSe('click');
+    socket.emit('leave_room', { room_id: currentRoomId });
+    // サーバーからの room_left 応答が何らかの理由（通信の瞬断など）で届かない場合、
+    // 待機画面が古いまま固まって操作不能に見えてしまうため、一定時間で強制的に
+    // ロビー表示へリセットする保険をかけておく
+    const roomIdAtClick = currentRoomId;
+    setTimeout(() => {
+        if (currentRoomId === roomIdAtClick) {
+            resetToEntryScreen();
+        }
+    }, 2500);
+}
+
+socket.on('room_left', () => {
+    resetToEntryScreen();
 });
 
 socket.on('room_joined', (data) => {
@@ -889,6 +903,10 @@ socket.on('system_msg', (data) => {
             playSe('chombo');
         } else if (data.message.includes('📣 ポン')) {
             playSe('pon');
+        } else if (data.message.includes('🔔 カン')) {
+            // カンは他家が鳴らした場合、ボタンのonclickでの再生が本人にしか効かず、
+            // これまで他プレイヤーには一切音が鳴らないバグになっていた
+            playSe('kan');
         } else if (data.message.includes('ロンを宣言')) {
             playSe('ron');
         }
@@ -1094,14 +1112,14 @@ socket.on('state_update', (state) => {
                         <div class="deck-count-label" style="color:#aaa; letter-spacing:1px;">山札残り</div>
                         <div class="deck-count-value" style="font-weight:bold; color:#00ffcc; text-shadow:0 0 8px rgba(0,255,204,0.7); line-height:1;">${deckCount}</div>
 
-                        ${lastDiscardTile ? `
+                        <div style="${lastDiscardTile ? '' : 'visibility:hidden;'}">
                             <div class="ron-target-label" style="margin-top:2px; color:#ff4757; font-weight:bold;">ロン/鳴き対象</div>
-                            <div class="tile-card tile-kawa last-discard-highlight" style="color:${lastDiscardColor};">${lastDiscardTile}</div>
+                            <div class="tile-card tile-kawa last-discard-highlight" style="color:${lastDiscardTile ? lastDiscardColor : ''};">${lastDiscardTile ?? '?'}</div>
 
                             <div class="ron-timer-track" style="width:80%; height:4px; background:#333; border-radius:3px; margin-top:3px; overflow:hidden;">
                                 <div id="action-timer-fill" class="timer-bar-fill"></div>
                             </div>
-                        ` : ''}
+                        </div>
                     </div>
 
                     <div class="kawa-box" style="grid-area: kawa-right;">${renderKawaTiles(playerRight)}</div>
@@ -1119,7 +1137,7 @@ socket.on('state_update', (state) => {
             <div class="seat-bottom">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                     <div style="font-size:15px; font-weight:bold; color:#ffd700;">
-                        👤 ${escapeHtml(state.my_name || 'あなた')} ${state.my_is_dealer ? '<span style="background:#ff7675;color:#111;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">親</span>' : ''} ${state.my_riichi ? '<span style="background:#d63031;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">❗リーチ</span>' : ''} ${state.my_furiten ? '<span style="background:#636e72;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">🚫フリテン</span>' : ''} (持ち点: <span style="color:#00ffcc;">${state.my_score_str || state.my_score || 0}</span> 点)
+                        👤 ${escapeHtml(state.my_name || 'あなた')} ${state.my_is_dealer ? '<span style="background:#ff7675;color:#111;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">親</span>' : ''} ${state.my_riichi ? '<span style="background:#d63031;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:bold;">❗リーチ</span>' : ''} (持ち点: <span style="color:#00ffcc;">${state.my_score_str || state.my_score || 0}</span> 点)
                     </div>
                     <div id="my-kans-box" style="display:flex; align-items:center; gap:4px;">
                         <span style="font-size:11px; color:#00b894; font-weight:bold;">副露(ポン/カン):</span>
@@ -1221,20 +1239,25 @@ function renderOpponentCard(op, positionLabel, isVertical = false) {
         : '';
 
     // 対面(横並び)は折り返すと縦に伸びて画面(特にスマホ横向きの低い高さ)を圧迫するため、
-    // 折り返さず横スクロールにする。上家/下家(isVertical)は逆に「縦に長い1列」だと
-    // 手牌13枚+槓分がそのまま高さになってしまう（かつては280pxの縦積みで、その行全体を
-    // 圧迫していた）ため、高さ4枚を1列として横に増えていくグリッドに変更する
+    // 折り返さず横スクロールにする。上家/下家(isVertical)は列を横に増やす方式だと、
+    // 実際のコンテナ幅（左右カラムは70〜140px程度しかない）を超えてはみ出し、
+    // 14枚目あたりで見切れてしまう不具合があった。列数を3列に固定し、増える分は
+    // 下に行を追加する方式にして、幅がはみ出さないようにする（高さは保険として
+    // max-height+overflow-yで頭打ちにする）
     const containerStyle = isVertical
-        ? 'display:flex; flex-direction:column; align-items:flex-start; gap:2px; background:rgba(0,0,0,0.2); padding:4px; border-radius:4px;'
+        ? 'display:flex; flex-direction:column; align-items:stretch; gap:2px; background:rgba(0,0,0,0.2); padding:4px; border-radius:4px; max-width:100%; box-sizing:border-box; max-height:clamp(70px, 22vh, 160px); overflow-y:auto;'
         : 'display:flex; flex-wrap:nowrap; overflow-x:auto; max-width:100%; align-items:center; gap:2px; background:rgba(0,0,0,0.2); padding:3px; border-radius:4px;';
 
     const handGridStyle = isVertical
-        ? 'display:grid; grid-auto-flow:column; grid-template-rows:repeat(4, auto); gap:1px;'
+        ? 'display:grid; grid-template-columns:repeat(3, 1fr); grid-auto-flow:row; gap:1px; justify-items:center;'
         : 'display:flex; flex-wrap:nowrap; gap:1px;';
 
+    // 副露（ポン・カン）は1組ごとにそれなりの幅を取るため、無制限に折り返すと
+    // カンが重なるたびに縦にどんどん伸びてしまっていた。1行あたり2組までに固定し、
+    // 3組目以降はその下の行に収まるようにする（＝高さの伸びを2組ごとに抑える）
     const meldDividerStyle = isVertical
-        ? 'border-top:1px dashed #00b894; margin-top:2px; padding-top:2px; display:grid; grid-auto-flow:column; grid-template-rows:repeat(4, auto); gap:1px;'
-        : 'border-left:1px dashed #00b894; margin-left:4px; padding-left:4px; display:inline-flex; flex-wrap:wrap; align-items:center;';
+        ? 'border-top:1px dashed #00b894; margin-top:2px; padding-top:2px; display:grid; grid-template-columns:repeat(2, auto); justify-content:center; gap:2px;'
+        : 'border-left:1px dashed #00b894; margin-left:4px; padding-left:4px; display:grid; grid-template-columns:repeat(2, auto); gap:2px; align-items:center;';
 
     return `
         <div style="background:rgba(0,0,0,0.4); border-radius:8px; padding:6px; border:1px solid ${op.is_turn ? '#00ffcc' : 'rgba(255,255,255,0.1)'}; ${op.is_turn ? 'box-shadow:0 0 10px rgba(0,255,204,0.4);' : ''}">

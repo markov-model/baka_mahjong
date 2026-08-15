@@ -144,10 +144,6 @@ def evaluate_hand(
             return True, ["🀄 国士無双十三面待ち (ダブル役満)"], YAKUMAN_BASE_SCORE * 2
         return True, ["🀄 国士無双 (役満)"], YAKUMAN_BASE_SCORE
 
-    # 清老頭 (老頭牌＝1・2・3・4・5・6のみ。7以降の字牌が混ざらない)
-    if all(t in TERMINAL_TILES for t in all_tiles):
-        return True, ["🀄 清老頭 (役満)"], YAKUMAN_BASE_SCORE
-
     # 七対子 (14枚で異なる7組の対子)
     is_chiitoi = (len(hand_tiles) == 14 and len(hand_counts) == 7 and all(c == 2 for c in hand_counts.values()))
 
@@ -167,6 +163,15 @@ def evaluate_hand(
         return False, [], 0
 
     # ---- ここから役満（複数成立する場合は加算し、最後にまとめて倍率計算する）----
+
+    # 清老頭 (老頭牌＝1・2・3・4・5・6のみ。7以降の字牌が混ざらない)。
+    # 以前は他の役満・通常役の判定より先に即returnしていたため、清一色などの通常役は
+    # おろか、有効な面子構成（is_standard_win）かどうかの検証すら経ずに成立してしまい、
+    # かつドラ等が乗って13翻を超えてもダブル役満に格上げされなかった。他の役満と同じ
+    # 加算方式に統一し、下部の数え役満判定と合流できるようにする。
+    if all(t in TERMINAL_TILES for t in all_tiles):
+        yakuman_count += 1
+        yaku.append("🀄 清老頭 (役満)")
 
     # 字一色 (字牌＝風牌・三元牌のみ)
     if all(t in HONOR_TILES for t in all_tiles):
@@ -332,7 +337,9 @@ def evaluate_hand(
         total_han += dora_count
         yaku.append(f"ドラ x{dora_count} ({dora_count}翻)")
 
-    if total_han >= 13 and yakuman_count == 0:
+    # 清老頭など「形」で成立する役満に乗ったドラ等で通常役側のtotal_hanが13翻を超えた場合も、
+    # 数え役満と同様にダブル役満へ格上げする（yakuman_count==0の縛りをなくし合算できるようにした）
+    if total_han >= 13:
         additional_yakuman = total_han // 13
         yakuman_count += additional_yakuman
         yaku.append(f"🀄 数え役満 ({total_han}翻)")
